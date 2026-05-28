@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 240px; padding: 16px; font-family: system-ui, sans-serif; margin: 0; }
+    h3 { margin: 0 0 12px; font-size: 14px; color: #333; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot.connected { background: #22c55e; }
+    .dot.disconnected { background: #ef4444; }
+    .dot.reconnecting { background: #f59e0b; }
+    .label { color: #555; }
+  </style>
+</head>
+<body>
+  <h3>Douyinks</h3>
+  <div class="status">
+    <div id="dot" class="dot disconnected"></div>
+    <span id="label" class="label">检查中...</span>
+  </div>
+  <script>
+    chrome.runtime.sendMessage({ type: 'getStatus' }, (res) => {
+      const dot = document.getElementById('dot');
+      const label = document.getElementById('label');
+      if (res?.connected) {
+        dot.className = 'dot connected';
+        label.textContent = 'Daemon 已连接';
+      } else if (res?.reconnecting) {
+        dot.className = 'dot reconnecting';
+        label.textContent = '重连中...';
+      } else {
+        dot.className = 'dot disconnected';
+        label.textContent = 'Daemon 未连接';
+      }
+    });
+  </script>
+</body>
+</html>
