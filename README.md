@@ -81,6 +81,28 @@ Use a different interval or progress file when needed:
 uv run douyinks download-links douyin_links.txt --delay 2 --progress-file /path/to/progress.json
 ```
 
+Export all Kuaishou liked videos to a JSONL manifest:
+
+```bash
+uv run douyinks export-kuaishou-liked kuaishou_liked.jsonl
+```
+
+If the command stops early, run the same command again. It resumes from the
+existing JSONL file, waits 4 seconds between liked-feed pages by default, and
+skips duplicate `photo_id` values. Use `--fresh` only when you want to overwrite
+the manifest and start from the beginning.
+
+Then download the manifest in line ranges:
+
+```bash
+uv run douyinks download-kuaishou-liked kuaishou_liked.jsonl 1-100
+uv run douyinks download-kuaishou-liked kuaishou_liked.jsonl 101-200
+```
+
+The export command calls Kuaishou's liked feed API through the logged-in browser
+session and follows `pcursor` until there are no more pages. Each JSONL row
+includes `photo_id`, author metadata, timestamp, and the selected `play_url`.
+
 Start the Matrix bot:
 
 ```bash

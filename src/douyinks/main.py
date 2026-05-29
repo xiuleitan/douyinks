@@ -115,5 +115,72 @@ def download_links(links_file, line_range, delay, progress_file, detail_retries,
     console.print(f"进度文件: {result['progress_file']}")
 
 
+@cli.command("export-kuaishou-liked")
+@click.argument("output_file", type=click.Path(dir_okay=False))
+@click.option("--limit", default=0, show_default=True, type=int, help="最多导出多少条，0 表示不限制。")
+@click.option("--max-pages", default=0, show_default=True, type=int, help="最多抓取多少页，0 表示不限制。")
+@click.option("--page-delay", default=4.0, show_default=True, type=float, help="每页 liked 请求之间等待的秒数。")
+@click.option("--fresh", is_flag=True, help="重新导出并覆盖已有清单，不从已有文件续跑。")
+@click.option("--log-level", default="INFO", show_default=True, help="日志级别，例如 DEBUG、INFO、WARNING。")
+def export_kuaishou_liked(output_file, limit, max_pages, page_delay, fresh, log_level):
+    """导出快手喜欢列表为 JSONL 清单。"""
+    from .platforms.kuaishou.liked_batch import export_liked_file
+
+    configure_logging(log_level)
+    settings = Settings.load()
+    result = run_async(
+        export_liked_file(
+            settings,
+            output_file,
+            limit=limit,
+            max_pages=max_pages,
+            page_delay=page_delay,
+            resume=not fresh,
+        )
+    )
+    console.print(
+        "导出完成: "
+        f"已有 {result.get('existing', 0)}，"
+        f"页数 {result['pages']}，"
+        f"条目 {result['exported']}。"
+    )
+    console.print(f"清单文件: {result['output_file']}")
+    if result.get("stopped_reason"):
+        console.print(f"[yellow]提前停止: {result['stopped_reason']}[/yellow]")
+
+
+@cli.command("download-kuaishou-liked")
+@click.argument("liked_file", type=click.Path(exists=True, dir_okay=False))
+@click.argument("line_range", required=False, metavar="[LINE_RANGE]")
+@click.option("--delay", default=1.0, show_default=True, type=float, help="每条视频之间等待的秒数。")
+@click.option("--log-level", default="INFO", show_default=True, help="日志级别，例如 DEBUG、INFO、WARNING。")
+def download_kuaishou_liked(liked_file, line_range, delay, log_level):
+    """从快手 JSONL 清单分批下载喜欢视频。"""
+    from .platforms.kuaishou.liked_batch import download_liked_file
+
+    configure_logging(log_level)
+    settings = Settings.load()
+    try:
+        result = run_async(
+            download_liked_file(
+                settings,
+                liked_file,
+                line_range=line_range,
+                delay=delay,
+            )
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    console.print(
+        "下载完成: "
+        f"请求 {result['requested']}，"
+        f"本次处理 {result['processed']}，"
+        f"成功 {result['success']}，"
+        f"失败 {result['failed']}，"
+        f"跳过 {result['skipped']}。"
+    )
+    console.print(f"保存目录: {result['output_dir']}")
+
+
 if __name__ == "__main__":
     cli()
