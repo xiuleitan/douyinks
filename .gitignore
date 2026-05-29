@@ -12,11 +12,14 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+.DS_Store
+tmp/
 downloads/
 videos/
 docs/superpowers/
-douyin_links.txt
+douyin_links*.txt
 douyin_note.md
-mydouyin.html
+mydouyin*.html
+kuaishou_liked*.jsonl
 *_files/
 *.log
