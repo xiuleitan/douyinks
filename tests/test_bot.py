@@ -62,6 +62,32 @@ class FakeDownloader:
         }
 
 
+class FakeRuntimeServices:
+    def __init__(self):
+        self.started = 0
+        self.scheduled = 0
+        self.stopped = 0
+
+    async def start_for_download(self):
+        self.started += 1
+
+    def schedule_idle_stop(self):
+        self.scheduled += 1
+
+    async def stop(self):
+        self.stopped += 1
+
+
+class FakeIpProvider:
+    def __init__(self, ips):
+        self.ips = ips
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+        return self.ips
+
+
 def make_settings():
     return Settings.from_mapping(
         {
@@ -70,6 +96,22 @@ def make_settings():
             "MATRIX_PASSWORD": "secret",
             "MATRIX_ALLOWED_ROOM_IDS": "!allowed:example",
             "DOWNLOAD_ROOT": "/tmp/downloads",
+        }
+    )
+
+
+def make_sync_settings():
+    return Settings.from_mapping(
+        {
+            "MATRIX_HOMESERVER_URL": "https://matrix.example",
+            "MATRIX_USERNAME": "@bot:example",
+            "MATRIX_PASSWORD": "secret",
+            "MATRIX_ALLOWED_ROOM_IDS": "!allowed:example",
+            "DOWNLOAD_ROOT": "/tmp/downloads",
+            "SYNC_SERVER_ENABLED": "true",
+            "SYNC_SERVER_HOST": "0.0.0.0",
+            "SYNC_SERVER_PORT": "19827",
+            "SYNC_TOKEN": "test-sync-token",
         }
     )
 
@@ -87,16 +129,51 @@ async def test_bot_ignores_non_whitelisted_rooms():
 
 
 @pytest.mark.asyncio
+async def test_bot_replies_with_lan_ip_without_starting_download_services():
+    client = FakeClient()
+    downloader = FakeDownloader()
+    runtime_services = FakeRuntimeServices()
+    ip_provider = FakeIpProvider(["192.168.1.23"])
+    bot = MatrixDownloadBot(
+        make_sync_settings(),
+        client=client,
+        downloader=downloader,
+        runtime_services=runtime_services,
+        ip_provider=ip_provider,
+    )
+
+    await bot.handle_text_message("!allowed:example", "@user:example", "查询 ip")
+
+    assert ip_provider.calls == 1
+    assert downloader.commands == []
+    assert runtime_services.started == 0
+    assert client.sent == [
+        (
+            "!allowed:example",
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "当前局域网 IP: 192.168.1.23\n手机同步地址: http://192.168.1.23:19827",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_bot_queues_download_and_replies_with_summary():
     client = FakeClient()
     downloader = FakeDownloader()
-    bot = MatrixDownloadBot(make_settings(), client=client, downloader=downloader)
+    runtime_services = FakeRuntimeServices()
+    bot = MatrixDownloadBot(make_settings(), client=client, downloader=downloader, runtime_services=runtime_services)
 
     await bot.handle_text_message("!allowed:example", "@user:example", "download douyin like 20")
     await bot.queue.join()
     await asyncio.wait_for(bot.stop_worker(), timeout=1)
 
     assert downloader.commands == [DownloadCommand(platform="douyin", source="like", count=20)]
+    assert runtime_services.started == 1
+    assert runtime_services.scheduled == 1
+    assert runtime_services.stopped == 1
     bodies = [content["body"] for _, _, content in client.sent]
     assert bodies == [
         "正在下载: douyin like 20",

@@ -57,6 +57,11 @@ Load the Chrome extension from `extension/` in `chrome://extensions`. Enable dev
 | `DOUYINKS_DAEMON_HOST` | no | Local daemon host. Defaults to `127.0.0.1`. |
 | `DOUYINKS_DAEMON_PORT` | no | Local daemon port. Defaults to `19826`. |
 | `DOWNLOAD_DELAY_SECONDS` | no | Delay between Matrix-triggered downloads. Defaults to `3`. |
+| `SYNC_SERVER_ENABLED` | no | Whether to enable the mobile pull sync server. Defaults to `false`. |
+| `SYNC_SERVER_HOST` | no | Sync server host. Use `0.0.0.0` for LAN access. |
+| `SYNC_SERVER_PORT` | no | Sync server port. Defaults to `19827`. |
+| `SYNC_TOKEN` | no | Fixed Bearer token used by the mobile app sync API. |
+| `TRANSIENT_SERVICE_IDLE_SECONDS` | no | Idle window before bot-started daemon and sync server are stopped. Defaults to `1800`. |
 
 Example:
 
@@ -69,6 +74,11 @@ DOWNLOAD_ROOT=/path/to/downloads
 DOUYINKS_DAEMON_HOST=127.0.0.1
 DOUYINKS_DAEMON_PORT=19826
 DOWNLOAD_DELAY_SECONDS=3
+SYNC_SERVER_ENABLED=false
+SYNC_SERVER_HOST=0.0.0.0
+SYNC_SERVER_PORT=19827
+SYNC_TOKEN=replace-with-a-long-random-sync-token
+TRANSIENT_SERVICE_IDLE_SECONDS=1800
 ```
 
 ## Usage
@@ -112,6 +122,14 @@ Use a different interval or progress file when needed:
 uv run douyinks download-links douyin_links.txt --delay 2 --progress-file /path/to/progress.json
 ```
 
+Redownload historical files whose saved filename starts with `unknown` into a separate folder:
+
+```bash
+uv run douyinks redownload-unknown-history /path/to/downloads/download_history.json douyin 1-20 --output-dir /path/to/downloads/redownload_unknown
+```
+
+The `1-20` range is applied after filtering the history to `unknown` entries; it is not the raw JSON file line number. Files are written under a platform subfolder such as `redownload_unknown/douyin`. For `kuaishou`, the history entry must include a downloadable `play_url`; otherwise the original history alone is not enough to redownload it.
+
 Export Kuaishou liked videos to a JSONL manifest:
 
 ```bash
@@ -133,11 +151,29 @@ Start the Matrix bot:
 uv run douyinks bot
 ```
 
+For daily use, keep only the Matrix bot running. When a download command arrives, the bot starts the browser bridge daemon on demand; if `SYNC_SERVER_ENABLED=true`, it also starts the mobile sync server. After the download finishes, those bot-owned services stay available for `TRANSIENT_SERVICE_IDLE_SECONDS` seconds, half an hour by default, so the mobile app can pull new files. When the idle window expires, the bot stops the daemon and sync server it started.
+
 Use debug logging when troubleshooting:
 
 ```bash
 uv run douyinks bot --log-level DEBUG
 ```
+
+For troubleshooting, you can also start the browser bridge daemon, Matrix bot, and mobile sync server together:
+
+```bash
+uv run douyinks serve
+```
+
+Start the LAN sync server used by the mobile app:
+
+```bash
+uv run douyinks sync-server
+```
+
+See [Mobile Sync API](docs/mobile-sync-api.md) for the app-side API contract. The sync service requires `Authorization: Bearer <SYNC_TOKEN>`; the mobile app should use a manually entered laptop sync server address such as `http://192.168.1.23:19827`. If the LAN IP changes, send `ip` or `查询 ip` in the Matrix room to get the current address.
+
+On first startup, the sync server treats existing successful downloads as a baseline, so historical files are not listed as pending. Only later downloads appear in the mobile pending list.
 
 ## Matrix Commands
 
@@ -146,9 +182,12 @@ Send one of these messages in an allowed Matrix room:
 ```text
 download douyin like 20
 download kuaishou like 20
+ip
 ```
 
 The count must be a positive integer and cannot exceed `200`.
+
+Send `ip` or `查询 ip` to have the bot reply with the laptop's current LAN IP address. If `SYNC_SERVER_ENABLED=true`, the reply also includes the mobile sync URL, for example `http://192.168.1.23:19827`.
 
 ## Output and Resume Files
 
@@ -179,10 +218,28 @@ uv run douyinks --help
 
 The project uses `uv.lock`; keep it committed when dependency changes are intentional.
 
+To start the project from any terminal directory, add a shell function to `~/.zshrc`:
+
+```bash
+douyinks-serve() {
+  cd /path/to/douyinks && uv run douyinks bot
+}
+```
+
+Open a new terminal, or run `source ~/.zshrc`, then start everything with:
+
+```bash
+douyinks-serve
+```
+
+This is better than only adding the command to PATH because `douyinks` reads `.env` from the project directory by default.
+For daily use, start `bot`; it starts daemon and sync-server on demand after receiving download commands.
+
 ## Privacy and Security
 
 - Do not commit `.env`; it contains Matrix credentials and local paths.
 - Do not commit exported liked-list manifests, raw browser page snapshots, downloaded videos, progress files, or history files. These may reveal account activity, liked content, signed media URLs, local paths, or personal preferences.
+- The sync server exposes downloaded files on the local network. Use a long `SYNC_TOKEN` and enable it only on trusted networks.
 - The Chrome extension requests `debugger`, `tabs`, `cookies`, and `<all_urls>` permissions so it can bridge browser automation for logged-in sessions. Load it only from a trusted local checkout.
 - If real credentials were ever committed, rotate them before publishing the repository.
 

@@ -57,6 +57,11 @@ cp .env.example .env
 | `DOUYINKS_DAEMON_HOST` | 否 | 本地 daemon 监听地址，默认 `127.0.0.1`。 |
 | `DOUYINKS_DAEMON_PORT` | 否 | 本地 daemon 端口，默认 `19826`。 |
 | `DOWNLOAD_DELAY_SECONDS` | 否 | Matrix 触发下载时每条之间的等待秒数，默认 `3`。 |
+| `SYNC_SERVER_ENABLED` | 否 | 是否启用手机端拉取用的同步服务，默认 `false`。 |
+| `SYNC_SERVER_HOST` | 否 | 同步服务监听地址；局域网访问通常设为 `0.0.0.0`。 |
+| `SYNC_SERVER_PORT` | 否 | 同步服务端口，默认 `19827`。 |
+| `SYNC_TOKEN` | 否 | 手机 APP 调用同步接口时使用的固定 Bearer Token。 |
+| `TRANSIENT_SERVICE_IDLE_SECONDS` | 否 | bot 临时启动 daemon 和 sync-server 后的空闲保留秒数，默认 `1800`。 |
 
 示例：
 
@@ -69,6 +74,11 @@ DOWNLOAD_ROOT=/path/to/downloads
 DOUYINKS_DAEMON_HOST=127.0.0.1
 DOUYINKS_DAEMON_PORT=19826
 DOWNLOAD_DELAY_SECONDS=3
+SYNC_SERVER_ENABLED=false
+SYNC_SERVER_HOST=0.0.0.0
+SYNC_SERVER_PORT=19827
+SYNC_TOKEN=replace-with-a-long-random-sync-token
+TRANSIENT_SERVICE_IDLE_SECONDS=1800
 ```
 
 ## 使用方法
@@ -112,6 +122,14 @@ uv run douyinks download-links douyin_links.txt 21-40
 uv run douyinks download-links douyin_links.txt --delay 2 --progress-file /path/to/progress.json
 ```
 
+重新下载历史记录中 `unknown` 前缀的文件到单独目录：
+
+```bash
+uv run douyinks redownload-unknown-history /path/to/downloads/download_history.json douyin 1-20 --output-dir /path/to/downloads/redownload_unknown
+```
+
+这里的 `1-20` 是在筛选出 `unknown` 记录后的序号范围，不是原始 JSON 文件行号。命令会按平台保存到独立子目录，例如 `redownload_unknown/douyin`。如果选择 `kuaishou`，历史记录中必须带有可下载的 `play_url`，否则无法只凭历史记录重新下载。
+
 导出快手喜欢列表：
 
 ```bash
@@ -133,11 +151,29 @@ uv run douyinks download-kuaishou-liked kuaishou_liked.jsonl 101-200
 uv run douyinks bot
 ```
 
+日常使用时推荐只常驻 Matrix bot。收到下载命令后，bot 会临时启动浏览器桥接 daemon；如果 `SYNC_SERVER_ENABLED=true`，也会临时启动手机同步服务。下载完成后会保留 `TRANSIENT_SERVICE_IDLE_SECONDS` 秒，默认半小时，方便手机 APP 拉取新增文件；空闲时间到后会自动停止由 bot 启动的 daemon 和 sync-server。
+
 排查问题时可开启 debug 日志：
 
 ```bash
 uv run douyinks bot --log-level DEBUG
 ```
+
+如需调试，也可以一次启动浏览器桥接 daemon、Matrix bot 和手机同步服务：
+
+```bash
+uv run douyinks serve
+```
+
+启动手机 APP 局域网拉取用的同步服务：
+
+```bash
+uv run douyinks sync-server
+```
+
+手机端接口说明见 [Mobile Sync API](docs/mobile-sync-api.md)。同步服务使用 `Authorization: Bearer <SYNC_TOKEN>` 保护接口；手机 APP 端手动填写笔记本同步服务地址，例如 `http://192.168.1.23:19827`。如果局域网 IP 变化，可以在 Matrix 房间发送 `ip` 或 `查询 ip` 获取当前地址。
+
+同步服务第一次启动时会把已有下载记录作为基线处理，不会把历史文件全部列为待同步；之后新增下载才会出现在手机端的 pending 列表中。
 
 ## Matrix 命令
 
@@ -146,9 +182,12 @@ uv run douyinks bot --log-level DEBUG
 ```text
 download douyin like 20
 download kuaishou like 20
+ip
 ```
 
 数量必须是正整数，且不能超过 `200`。
+
+发送 `ip` 或 `查询 ip` 时，bot 会返回当前笔记本的局域网 IP。如果 `SYNC_SERVER_ENABLED=true`，回复中也会包含手机 APP 可填写的同步服务地址，例如 `http://192.168.1.23:19827`。
 
 ## 输出与续跑文件
 
@@ -179,10 +218,27 @@ uv run douyinks --help
 
 项目使用 `uv.lock` 锁定依赖；如果依赖变更是有意的，请一并提交该文件。
 
+如果希望打开终端后在任意目录直接启动，可以在 `~/.zshrc` 中添加一个函数，让它自动进入项目目录再运行：
+
+```bash
+douyinks-serve() {
+  cd /path/to/douyinks && uv run douyinks bot
+}
+```
+
+重新打开终端，或运行 `source ~/.zshrc` 后，即可直接执行：
+
+```bash
+douyinks-serve
+```
+
+这种方式比单纯把命令加入 PATH 更适合当前项目，因为 `douyinks` 默认从项目目录读取 `.env`。日常推荐启动 `bot`；它会在收到下载命令后按需拉起 daemon 和 sync-server。
+
 ## 隐私与安全
 
 - 不要提交 `.env`，其中包含 Matrix 凭据和本地路径。
 - 不要提交导出的喜欢列表清单、浏览器页面快照、已下载视频、进度文件或历史文件。这些文件可能暴露账号活动、喜欢内容、带签名的媒体 URL、本地路径或个人偏好。
+- 同步服务会在局域网暴露下载文件拉取接口，请设置足够长的 `SYNC_TOKEN`，并只在可信网络中开启。
 - Chrome 扩展申请了 `debugger`、`tabs`、`cookies` 和 `<all_urls>` 权限，用于桥接已登录浏览器会话。请只从可信的本地代码加载该扩展。
 - 如果真实凭据曾经进入 git 历史，请在发布前轮换这些凭据。
 

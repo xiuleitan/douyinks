@@ -93,6 +93,31 @@ async def test_douyin_download_records_history_after_success(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_douyin_download_uses_normalized_author_nickname_when_unique_id_missing(tmp_path, monkeypatch):
+    output_dir = tmp_path / "douyin" / "likes"
+
+    async def fake_download(_url, output_path, referer):
+        output_path.write_bytes(b"new")
+        return True
+
+    monkeypatch.setattr(douyin_download, "download_single", fake_download)
+
+    result = await douyin_download.download_videos(
+        [{
+            "aweme_id": "999999999999",
+            "author": "小猫🐱爱跳舞 Alice 123",
+            "author_douyin_id": "",
+            "create_time": 123,
+            "play_url": "https://example.test/video.mp4",
+        }],
+        str(output_dir),
+        delay=0,
+    )
+
+    assert result["items"] == [{"filename": "XiaoMaoAiTiaoWuAlice123_123_999999999999.mp4", "success": True, "status": "success"}]
+
+
+@pytest.mark.asyncio
 async def test_douyin_download_saves_all_images_with_video_style_names(tmp_path, monkeypatch):
     output_dir = tmp_path / "douyin" / "likes"
     history = DownloadHistory(tmp_path / "download_history.json")

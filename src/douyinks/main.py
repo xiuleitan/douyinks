@@ -6,6 +6,7 @@ from rich.console import Console
 
 from .browser import check_daemon
 from .config import CUSTOM_HEADER, Settings
+from .supervisor import build_service_commands, supervise_services
 
 console = Console(stderr=True)
 
@@ -32,11 +33,12 @@ def cli():
 def bot(log_level):
     """启动 Matrix 下载机器人。"""
     from .bot import MatrixDownloadBot
+    from .transient_services import TransientRuntimeServices
 
     configure_logging(log_level)
     settings = Settings.load()
     logging.getLogger("douyinks.main").info("Starting bot command")
-    run_async(MatrixDownloadBot(settings).start())
+    run_async(MatrixDownloadBot(settings, runtime_services=TransientRuntimeServices(settings, log_level=log_level)).start())
 
 
 @cli.command()
@@ -47,6 +49,36 @@ def daemon(host, port):
     from .daemon import main as daemon_main
 
     daemon_main(host=host, port=port)
+
+
+@cli.command()
+@click.option("--log-level", default="INFO", show_default=True, help="bot 和 sync-server 的日志级别。")
+def serve(log_level):
+    """同时启动 daemon、bot 和手机同步服务。"""
+    configure_logging(log_level)
+    settings = Settings.load()
+    supervise_services(build_service_commands(settings, log_level=log_level))
+
+
+@cli.command("sync-server")
+@click.option("--host", default=None, help="覆盖 SYNC_SERVER_HOST。")
+@click.option("--port", default=None, type=int, help="覆盖 SYNC_SERVER_PORT。")
+@click.option("--log-level", default="INFO", show_default=True, help="日志级别，例如 DEBUG、INFO、WARNING。")
+def sync_server(host, port, log_level):
+    """启动手机端局域网拉取用的 HTTP 同步服务。"""
+    from dataclasses import replace
+
+    from .sync_server import run_sync_server
+
+    configure_logging(log_level)
+    settings = Settings.load()
+    if host is not None or port is not None:
+        settings = replace(
+            settings,
+            sync_server_host=host if host is not None else settings.sync_server_host,
+            sync_server_port=port if port is not None else settings.sync_server_port,
+        )
+    run_sync_server(settings)
 
 
 @cli.command()
@@ -173,6 +205,43 @@ def download_kuaishou_liked(liked_file, line_range, delay, log_level):
         raise click.ClickException(str(exc)) from exc
     console.print(
         "下载完成: "
+        f"请求 {result['requested']}，"
+        f"本次处理 {result['processed']}，"
+        f"成功 {result['success']}，"
+        f"失败 {result['failed']}，"
+        f"跳过 {result['skipped']}。"
+    )
+    console.print(f"保存目录: {result['output_dir']}")
+
+
+@cli.command("redownload-unknown-history")
+@click.argument("history_file", type=click.Path(exists=True, dir_okay=False))
+@click.argument("platform", type=click.Choice(["douyin", "kuaishou", "all"]))
+@click.argument("line_range", required=False, metavar="[LINE_RANGE]")
+@click.option("--output-dir", default=None, type=click.Path(file_okay=False), help="单独保存目录，默认 DOWNLOAD_ROOT/redownload_unknown。")
+@click.option("--delay", default=1.0, show_default=True, type=float, help="每条记录之间等待的秒数。")
+@click.option("--log-level", default="INFO", show_default=True, help="日志级别，例如 DEBUG、INFO、WARNING。")
+def redownload_unknown_history_cmd(history_file, platform, line_range, output_dir, delay, log_level):
+    """从 download_history 中重新下载 unknown 前缀记录。"""
+    from .unknown_redownload import redownload_unknown_history
+
+    configure_logging(log_level)
+    settings = Settings.load()
+    try:
+        result = run_async(
+            redownload_unknown_history(
+                settings,
+                history_file,
+                platform=platform,
+                line_range=line_range,
+                output_dir=output_dir,
+                delay=delay,
+            )
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    console.print(
+        "重新下载完成: "
         f"请求 {result['requested']}，"
         f"本次处理 {result['processed']}，"
         f"成功 {result['success']}，"

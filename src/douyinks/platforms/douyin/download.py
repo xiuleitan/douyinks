@@ -1,5 +1,8 @@
 from pathlib import Path
+import re
 from urllib.parse import urlparse
+
+from pypinyin import lazy_pinyin
 
 from ...history import DownloadHistory
 from ..common import download_single, pause_between_items, sanitize_filename
@@ -29,7 +32,7 @@ async def download_videos(
     for index, video in enumerate(videos, 1):
         aweme_id = video.get("aweme_id", "")
         play_url = video.get("play_url", "")
-        author_id = sanitize_filename(video.get("author_douyin_id", ""), max_len=30)
+        author_id = _author_prefix(video.get("author_douyin_id", ""), video.get("author", ""))
         create_time = str(video.get("create_time", 0))
         media_type = video.get("media_type") or "video"
         image_urls = [str(url) for url in video.get("image_urls", []) if url]
@@ -175,3 +178,23 @@ def _media_file(output_dir: Path, base_name: str, index: int, url: str, kind: st
     elif suffix not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
         suffix = ".jpg"
     return output_dir / f"{base_name}_{index:03d}{suffix}"
+
+
+def _author_prefix(author_douyin_id: str, author_name: str) -> str:
+    author_id = sanitize_filename(author_douyin_id, max_len=30)
+    if author_id != "unknown":
+        return author_id
+    nickname = _nickname_pascal_slug(author_name)
+    return nickname[:30] if nickname else "unknown"
+
+
+def _nickname_pascal_slug(name: str) -> str:
+    parts: list[str] = []
+    for token in re.findall(r"[\u4e00-\u9fff]+|[A-Za-z]+|\d+", name):
+        if token.isdigit():
+            parts.append(token)
+        elif re.fullmatch(r"[A-Za-z]+", token):
+            parts.append(token[:1].upper() + token[1:])
+        else:
+            parts.extend(item.capitalize() for item in lazy_pinyin(token) if item)
+    return "".join(parts)

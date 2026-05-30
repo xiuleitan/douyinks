@@ -25,6 +25,11 @@ class Settings:
     daemon_host: str = "127.0.0.1"
     daemon_port: int = 19826
     download_delay_seconds: float = 3.0
+    sync_server_enabled: bool = False
+    sync_server_host: str = "127.0.0.1"
+    sync_server_port: int = 19827
+    sync_token: str = ""
+    transient_service_idle_seconds: float = 30 * 60
 
     @classmethod
     def load(cls, env_file: str | None = ".env") -> "Settings":
@@ -59,6 +64,11 @@ class Settings:
             daemon_host=values.get("DOUYINKS_DAEMON_HOST", "127.0.0.1").strip() or "127.0.0.1",
             daemon_port=int(values.get("DOUYINKS_DAEMON_PORT", "19826")),
             download_delay_seconds=float(values.get("DOWNLOAD_DELAY_SECONDS", "3")),
+            sync_server_enabled=_env_bool(values.get("SYNC_SERVER_ENABLED", "false")),
+            sync_server_host=values.get("SYNC_SERVER_HOST", "127.0.0.1").strip() or "127.0.0.1",
+            sync_server_port=int(values.get("SYNC_SERVER_PORT", "19827")),
+            sync_token=values.get("SYNC_TOKEN", "").strip(),
+            transient_service_idle_seconds=float(values.get("TRANSIENT_SERVICE_IDLE_SECONDS", "1800")),
         )
 
     @property
@@ -92,6 +102,14 @@ class Settings:
     @property
     def matrix_sync_state_path(self) -> str:
         return str(Path(self.download_root) / "matrix_sync_state.json")
+
+    @property
+    def sync_state_path(self) -> str:
+        return str(Path(self.download_root) / "sync_state.json")
+
+
+def _env_bool(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 DEFAULT_DAEMON_HOST = "127.0.0.1"

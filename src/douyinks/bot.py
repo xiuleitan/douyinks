@@ -8,7 +8,9 @@ from nio import AsyncClient, MatrixRoom, RoomMessageText, SyncResponse
 from .commands import CommandParseError, DownloadCommand, parse_download_command
 from .config import Settings
 from .downloader import DownloadService
+from .network import get_lan_ips
 from .sync_state import MatrixSyncState
+from .transient_services import TransientRuntimeServices
 
 logger = logging.getLogger("douyinks.bot")
 
@@ -20,10 +22,14 @@ class MatrixDownloadBot:
         *,
         client: Any | None = None,
         downloader: Any | None = None,
+        runtime_services: Any | None = None,
+        ip_provider: Any | None = None,
     ):
         self.settings = settings
         self.client = client or AsyncClient(settings.matrix_homeserver_url, settings.matrix_username)
         self.downloader = downloader or DownloadService(settings)
+        self.runtime_services = runtime_services or TransientRuntimeServices(settings)
+        self.ip_provider = ip_provider or get_lan_ips
         self.sync_state = MatrixSyncState(settings.matrix_sync_state_path)
         self.queue: asyncio.Queue[tuple[str, DownloadCommand]] = asyncio.Queue()
         self._worker_task: asyncio.Task | None = None
@@ -66,6 +72,10 @@ class MatrixDownloadBot:
             logger.debug("Ignoring message sent by bot user room=%s", room_id)
             return
 
+        if is_ip_query(body):
+            await self.send_text(room_id, format_ip_reply(self.ip_provider(), self.settings))
+            return
+
         try:
             command = parse_download_command(body)
         except CommandParseError:
@@ -99,6 +109,7 @@ class MatrixDownloadBot:
                     room_id,
                 )
                 await self.send_text(room_id, f"正在下载: {command.platform} {command.source} {command.count}")
+                await self.runtime_services.start_for_download()
                 result = await self.downloader.run(command)
                 body, formatted_body = format_download_result_markdown(result)
                 await self.send_markdown(room_id, body, formatted_body)
@@ -120,6 +131,7 @@ class MatrixDownloadBot:
                 )
                 await self.send_text(room_id, f"下载失败: {exc}")
             finally:
+                self.runtime_services.schedule_idle_stop()
                 self.queue.task_done()
 
     async def stop_worker(self) -> None:
@@ -130,6 +142,7 @@ class MatrixDownloadBot:
             await self._worker_task
         except asyncio.CancelledError:
             pass
+        await self.runtime_services.stop()
 
     async def send_text(self, room_id: str, body: str) -> None:
         await self.client.room_send(
@@ -189,3 +202,17 @@ def _status_label(item: dict) -> str:
     if status == "failed":
         return "失败"
     return "失败"
+
+
+def is_ip_query(message: str) -> bool:
+    normalized = " ".join(message.strip().lower().split())
+    return normalized in {"ip", "查询 ip", "查询ip", "局域网 ip", "局域网ip"}
+
+
+def format_ip_reply(ips: list[str], settings: Settings) -> str:
+    if not ips:
+        return "未找到可用的局域网 IP。请确认笔记本已连接 Wi-Fi 或局域网。"
+    lines = [f"当前局域网 IP: {', '.join(ips)}"]
+    if settings.sync_server_enabled:
+        lines.append(f"手机同步地址: http://{ips[0]}:{settings.sync_server_port}")
+    return "\n".join(lines)

@@ -32,11 +32,31 @@ class DownloadService:
 
     async def run(self, command: DownloadCommand) -> dict:
         await self.ensure_daemon()
+        await self.wait_for_extension_connection()
         if command.platform == "douyin":
             return await self._download_douyin_likes(command.count)
         if command.platform == "kuaishou":
             return await self._download_kuaishou_likes(command.count)
         raise ValueError(f"Unsupported platform: {command.platform}")
+
+    async def wait_for_extension_connection(self, *, timeout: float = 30.0) -> None:
+        attempts = max(1, int(timeout))
+        last_error = ""
+        for attempt in range(attempts):
+            try:
+                status = await self.status()
+            except Exception as exc:
+                last_error = str(exc)
+            else:
+                if status.get("extensionConnected"):
+                    return
+                last_error = "extensionConnected=false"
+            if attempt < attempts - 1:
+                await asyncio.sleep(1.0)
+        raise RuntimeError(
+            "浏览器扩展暂未连接到 Douyinks daemon。请打开 Chrome 或刷新 Douyinks Browser Bridge 扩展，"
+            f"然后重试。最后状态: {last_error}"
+        )
 
     async def _download_douyin_likes(self, count: int) -> dict:
         from .platforms.douyin import detail, download, scrape_ids
