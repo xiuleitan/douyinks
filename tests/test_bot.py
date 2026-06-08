@@ -62,6 +62,11 @@ class FakeDownloader:
         }
 
 
+class FailingDownloader:
+    async def run(self, _command):
+        raise RuntimeError("extension disconnected")
+
+
 class FakeRuntimeServices:
     def __init__(self):
         self.started = 0
@@ -157,6 +162,7 @@ async def test_bot_replies_with_lan_ip_without_starting_download_services():
             },
         )
     ]
+    assert "com.talk.kind" not in client.sent[0][2]
 
 
 @pytest.mark.asyncio
@@ -179,8 +185,28 @@ async def test_bot_queues_download_and_replies_with_summary():
         "正在下载: douyin like 20",
         "| 文件名 | 是否成功 |\n| --- | --- |\n| a.mp4 | 成功 |",
     ]
+    assert "com.talk.kind" not in client.sent[0][2]
+    assert "com.talk.kind" not in client.sent[1][2]
     assert client.sent[1][2]["format"] == "org.matrix.custom.html"
     assert "<table>" in client.sent[1][2]["formatted_body"]
+
+
+@pytest.mark.asyncio
+async def test_bot_sends_download_failure_as_plain_text():
+    client = FakeClient()
+    bot = MatrixDownloadBot(
+        make_settings(),
+        client=client,
+        downloader=FailingDownloader(),
+        runtime_services=FakeRuntimeServices(),
+    )
+
+    await bot.handle_text_message("!allowed:example", "@user:example", "download douyin like 20")
+    await bot.queue.join()
+    await asyncio.wait_for(bot.stop_worker(), timeout=1)
+
+    assert client.sent[-1][2]["body"] == "下载失败: extension disconnected"
+    assert "com.talk.kind" not in client.sent[-1][2]
 
 
 def test_format_download_result_markdown_includes_failed_and_skipped_items():

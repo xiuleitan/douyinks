@@ -189,6 +189,8 @@ The count must be a positive integer and cannot exceed `200`.
 
 Send `ip` or `查询 ip` to have the bot reply with the laptop's current LAN IP address. If `SYNC_SERVER_ENABLED=true`, the reply also includes the mobile sync URL, for example `http://192.168.1.23:19827`.
 
+Bot replies are plain `m.room.message` text or Markdown messages. They do not add client-specific notification metadata such as `com.talk.kind`.
+
 ## Output and Resume Files
 
 Downloads are saved under:
@@ -233,6 +235,7 @@ douyinks-serve
 ```
 
 This is better than only adding the command to PATH because `douyinks` reads `.env` from the project directory by default.
+
 For daily use, start `bot`; it starts daemon and sync-server on demand after receiving download commands.
 
 ## Privacy and Security

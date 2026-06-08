@@ -189,6 +189,8 @@ ip
 
 发送 `ip` 或 `查询 ip` 时，bot 会返回当前笔记本的局域网 IP。如果 `SYNC_SERVER_ENABLED=true`，回复中也会包含手机 APP 可填写的同步服务地址，例如 `http://192.168.1.23:19827`。
 
+bot 的主动回复使用普通 `m.room.message` 文本或 Markdown 消息，不额外添加 `com.talk.kind` 等客户端私有通知元数据。
+
 ## 输出与续跑文件
 
 下载文件会保存到：
