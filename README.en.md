@@ -182,10 +182,13 @@ Send one of these messages in an allowed Matrix room:
 ```text
 download douyin like 20
 download kuaishou like 20
+kuaishou capture start
+captured num
+download kuaishou captured 200
 ip
 ```
 
-The count must be a positive integer and cannot exceed `200`.
+The count must be a positive integer and cannot exceed `500`. Send `captured num` to check how many unique Kuaishou liked videos have been captured so far; if the number is too low, keep loading in the browser before sending `download kuaishou captured <count>`.
 
 Send `ip` or `查询 ip` to have the bot reply with the laptop's current LAN IP address. If `SYNC_SERVER_ENABLED=true`, the reply also includes the mobile sync URL, for example `http://192.168.1.23:19827`.
 

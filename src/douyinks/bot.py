@@ -5,7 +5,7 @@ from typing import Any
 
 from nio import AsyncClient, MatrixRoom, RoomMessageText, SyncResponse
 
-from .commands import CommandParseError, DownloadCommand, parse_download_command
+from .commands import CaptureCommand, CommandParseError, DownloadCommand, parse_capture_command, parse_download_command
 from .config import Settings
 from .downloader import DownloadService
 from .network import get_lan_ips
@@ -77,6 +77,14 @@ class MatrixDownloadBot:
             return
 
         try:
+            capture_command = parse_capture_command(body)
+        except CommandParseError:
+            capture_command = None
+        if capture_command is not None:
+            await self._handle_capture_command(room_id, capture_command)
+            return
+
+        try:
             command = parse_download_command(body)
         except CommandParseError:
             logger.debug("Ignoring unsupported message room=%s sender=%s", room_id, sender)
@@ -93,6 +101,28 @@ class MatrixDownloadBot:
             sender,
         )
 
+    async def _handle_capture_command(self, room_id: str, command: CaptureCommand) -> None:
+        try:
+            await self.runtime_services.start_for_download()
+            if command.platform == "kuaishou" and command.target == "liked" and command.action == "start":
+                await self.downloader.start_kuaishou_liked_capture()
+                await self.send_text(
+                    room_id,
+                    "快手点赞监听已启动，可以刷新网页、进入点赞页面并向下滚动鼠标了。加载完成后发送 download kuaishou captured <数量>。",
+                )
+                return
+            if command.platform == "kuaishou" and command.target == "liked" and command.action == "num":
+                summary = await self.downloader.count_kuaishou_liked_capture()
+                await self.send_text(room_id, format_capture_count(summary))
+                return
+            await self.send_text(room_id, "不支持的捕获命令。")
+        except Exception as exc:
+            logger.exception("Capture command failed platform=%s target=%s action=%s", command.platform, command.target, command.action)
+            prefix = "查询失败" if command.action == "num" else "监听失败"
+            await self.send_text(room_id, f"{prefix}: {exc}")
+        finally:
+            self.runtime_services.schedule_idle_stop()
+
     def _ensure_worker(self) -> None:
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker())
@@ -108,7 +138,7 @@ class MatrixDownloadBot:
                     command.count,
                     room_id,
                 )
-                await self.send_text(room_id, f"正在下载: {command.platform} {command.source} {command.count}")
+                await self.send_text(room_id, f"正在下载: {format_command_label(command)}")
                 await self.runtime_services.start_for_download()
                 result = await self.downloader.run(command)
                 body, formatted_body = format_download_result_markdown(result)
@@ -175,22 +205,68 @@ def format_download_result(result: dict) -> str:
     )
 
 
+def format_command_label(command: DownloadCommand) -> str:
+    count_text = str(command.count)
+    if command.range_start is not None and command.range_end is not None:
+        count_text = f"{command.range_start}-{command.range_end}"
+    return f"{command.platform} {command.source} {count_text}"
+
+
+def format_capture_count(summary: dict) -> str:
+    parts = [f"当前已捕获 {summary.get('video_count', 0)} 个快手点赞视频"]
+    pending = summary.get("pending_response_count", 0)
+    failed = summary.get("error_count", 0)
+    dropped = summary.get("dropped_response_count", 0)
+    if isinstance(pending, int) and pending > 0:
+        parts.append(f"{pending} 条响应仍在写入")
+    if isinstance(failed, int) and failed > 0:
+        parts.append(f"{failed} 条响应读取失败")
+    if isinstance(dropped, int) and dropped > 0:
+        parts.append(f"{dropped} 条响应超出缓存上限")
+    return "，".join(parts) + "。"
+
+
 def format_download_result_markdown(result: dict) -> tuple[str, str]:
     items = result.get("items") or []
-    lines = ["| 文件名 | 是否成功 |", "| --- | --- |"]
-    html_rows = ["<table>", "<thead><tr><th>文件名</th><th>是否成功</th></tr></thead>", "<tbody>"]
+    actual_items = items
+    lines = ["| 序号 | 文件名 | 是否成功 |", "| --- | --- | --- |"]
+    html_rows = [
+        "<table>",
+        "<thead><tr><th>序号</th><th>文件名</th><th>是否成功</th></tr></thead>",
+        "<tbody>",
+    ]
 
     if not items:
         items = [{"filename": "无文件", "success": False, "status": "skipped"}]
 
-    for item in items:
-        filename = str(item.get("filename") or "")
+    for index, item in enumerate(items, start=1):
+        filename = _display_filename(str(item.get("filename") or ""))
         status = _status_label(item)
-        lines.append(f"| {filename} | {status} |")
-        html_rows.append(f"<tr><td>{escape(filename)}</td><td>{escape(status)}</td></tr>")
+        lines.append(f"| {index} | {filename} | {status} |")
+        html_rows.append(f"<tr><td>{index}</td><td>{escape(filename)}</td><td>{escape(status)}</td></tr>")
 
+    summary = format_download_summary(result, actual_items)
+    lines.extend(["", summary])
     html_rows.extend(["</tbody>", "</table>"])
+    html_rows.append(f"<p>{escape(summary)}</p>")
     return "\n".join(lines), "".join(html_rows)
+
+
+def format_download_summary(result: dict, items: list[dict]) -> str:
+    success = _result_count(result, "success", sum(item.get("success") is True for item in items))
+    skipped = _result_count(result, "skipped", sum(item.get("status") == "skipped" for item in items))
+    failed = _result_count(result, "failed", sum(_status_label(item) == "失败" for item in items))
+    total = success + skipped + failed
+    return f"总计：共 {total} 个，成功下载 {success} 个，跳过 {skipped} 个，失败 {failed} 个。"
+
+
+def _result_count(result: dict, key: str, fallback: int) -> int:
+    value = result.get(key)
+    return value if isinstance(value, int) and value >= 0 else fallback
+
+
+def _display_filename(filename: str) -> str:
+    return filename.split("_", 1)[0] if "_" in filename else filename
 
 
 def _status_label(item: dict) -> str:

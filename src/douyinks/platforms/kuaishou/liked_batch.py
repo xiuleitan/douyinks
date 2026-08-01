@@ -9,8 +9,8 @@ from ...downloader import DownloadService
 from ...history import DownloadHistory
 from ..douyin.link_batch import wait_for_extension_connection
 from . import download
-from .browser_fetch import KuaishouAPIError, browser_fetch
-from .liked import _pick_best_url
+from .browser_fetch import KuaishouAPIError
+from .liked import _fetch_liked_page_via_api, _open_liked_page, _pick_best_url
 
 
 async def export_liked_file(
@@ -106,15 +106,8 @@ async def download_liked_file(
 
 async def _fetch_liked_page(page: BrowserPage, pcursor: str) -> dict[str, Any]:
     if page.tab_id is None:
-        await page.goto("https://www.kuaishou.com")
-        await page.wait(3)
-    res = await browser_fetch(
-        page,
-        "POST",
-        "https://www.kuaishou.com/rest/v/feed/liked",
-        body={"pcursor": pcursor, "page": "private"},
-        headers={"referer": "https://www.kuaishou.com/"},
-    )
+        await _open_liked_page(page)
+    res = await _fetch_liked_page_via_api(page, pcursor)
     if not isinstance(res, dict):
         return {"pcursor": "", "feeds": []}
     return {

@@ -182,10 +182,13 @@ uv run douyinks sync-server
 ```text
 download douyin like 20
 download kuaishou like 20
+kuaishou capture start
+captured num
+download kuaishou captured 200
 ip
 ```
 
-数量必须是正整数，且不能超过 `200`。
+数量必须是正整数，且不能超过 `500`。发送 `captured num` 可以查看当前快手点赞监听已捕获的唯一视频数量；数量不够时继续在浏览器加载，够了再发送 `download kuaishou captured <数量>`。
 
 发送 `ip` 或 `查询 ip` 时，bot 会返回当前笔记本的局域网 IP。如果 `SYNC_SERVER_ENABLED=true`，回复中也会包含手机 APP 可填写的同步服务地址，例如 `http://192.168.1.23:19827`。
 

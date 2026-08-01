@@ -233,3 +233,5 @@ def test_cli_exposes_kuaishou_liked_commands():
 
     assert runner.invoke(cli, ["export-kuaishou-liked", "--help"]).exit_code == 0
     assert runner.invoke(cli, ["download-kuaishou-liked", "--help"]).exit_code == 0
+    assert runner.invoke(cli, ["start-kuaishou-liked-capture", "--help"]).exit_code == 0
+    assert runner.invoke(cli, ["download-kuaishou-captured", "--help"]).exit_code == 0

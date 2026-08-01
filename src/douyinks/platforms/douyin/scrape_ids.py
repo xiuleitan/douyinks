@@ -18,10 +18,31 @@ EXTRACT_IDS_JS = """
 
 SCROLL_JS = """
 (() => {
-  window.scrollTo(0, document.body.scrollHeight);
-  return document.body.scrollHeight;
+  const root = document.scrollingElement || document.documentElement || document.body;
+  const before = root.scrollTop;
+  window.scrollTo(0, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight));
+  root.scrollTop = root.scrollHeight;
+
+  let scrollableCount = 0;
+  document.querySelectorAll('*').forEach((node) => {
+    if (node.scrollHeight > node.clientHeight + 120) {
+      node.scrollTop = node.scrollHeight;
+      scrollableCount += 1;
+    }
+  });
+
+  return {
+    height: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+    scrollTop: root.scrollTop,
+    moved: root.scrollTop !== before,
+    scrollableCount,
+  };
 })()
 """
+
+
+def _stagnant_limit(limit: int) -> int:
+    return max(3, min(12, limit // 50 + 3))
 
 
 async def run(page: BrowserPage, limit: int, scroll_delay: float = 2.0) -> list[str]:
@@ -33,7 +54,9 @@ async def run(page: BrowserPage, limit: int, scroll_delay: float = 2.0) -> list[
     stagnant_rounds = 0
     previous_count = 0
 
-    while len(all_ids) < limit and stagnant_rounds < 3:
+    max_stagnant_rounds = _stagnant_limit(limit)
+
+    while len(all_ids) < limit and stagnant_rounds < max_stagnant_rounds:
         ids = await page.evaluate(EXTRACT_IDS_JS)
         if isinstance(ids, list):
             for video_id in ids:

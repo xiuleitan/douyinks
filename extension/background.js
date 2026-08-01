@@ -203,6 +203,10 @@ async function handleCommand(cmd) {
     switch (cmd.action) {
       case 'exec':
         return await handleExec(cmd, workspace);
+      case 'mouseClick':
+        return await handleMouseClick(cmd, workspace);
+      case 'kuaishouLikedCapture':
+        return await handleKuaishouLikedCapture(cmd);
       case 'navigate':
         return await handleNavigate(cmd, workspace);
       case 'tabs':
@@ -223,6 +227,55 @@ async function handleExec(cmd, workspace) {
   try {
     const data = await executor.evaluate(tabId, cmd.code);
     return { id: cmd.id, ok: true, data };
+  } catch (err) {
+    return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function handleMouseClick(cmd, workspace) {
+  if (typeof cmd.x !== 'number' || typeof cmd.y !== 'number') {
+    return { id: cmd.id, ok: false, error: 'Missing click coordinates' };
+  }
+  const tabId = await resolveTabId(cmd.tabId, workspace);
+  try {
+    const data = await executor.click(tabId, cmd.x, cmd.y);
+    return { id: cmd.id, ok: true, data };
+  } catch (err) {
+    return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function findKuaishouTabId(tabId) {
+  if (tabId !== undefined) {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.id && tab.url?.includes('kuaishou.com')) return tab.id;
+    throw new Error('指定 tab 不是快手页面');
+  }
+  const tabs = await chrome.tabs.query({ url: ['*://www.kuaishou.com/*', '*://kuaishou.com/*'] });
+  const active = tabs.find((tab) => tab.active && tab.id);
+  const tab = active ?? tabs.find((item) => item.id);
+  if (!tab?.id) {
+    throw new Error('未找到已打开的快手页面，请先在 Chrome 打开 kuaishou.com 的点赞页。');
+  }
+  return tab.id;
+}
+
+async function handleKuaishouLikedCapture(cmd) {
+  const tabId = await findKuaishouTabId(cmd.tabId);
+  try {
+    switch (cmd.op) {
+      case 'start': {
+        const data = await executor.startKuaishouLikedCapture(tabId, { clear: cmd.clear !== false });
+        const tab = await chrome.tabs.get(tabId);
+        return { id: cmd.id, ok: true, data: { ...data, url: tab.url, title: tab.title } };
+      }
+      case 'read':
+        return { id: cmd.id, ok: true, data: executor.readKuaishouLikedCapture(tabId) };
+      case 'clear':
+        return { id: cmd.id, ok: true, data: executor.clearKuaishouLikedCapture(tabId) };
+      default:
+        return { id: cmd.id, ok: false, error: `Unknown kuaishouLikedCapture op: ${cmd.op}` };
+    }
   } catch (err) {
     return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
   }

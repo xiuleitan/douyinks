@@ -106,5 +106,37 @@ class BrowserPage:
             **kwargs,
         )
 
+    async def click(self, x: float, y: float) -> Any:
+        kwargs = {"tabId": self.tab_id} if self.tab_id is not None else {}
+        return await send_command(
+            "mouseClick",
+            workspace=self.workspace,
+            host=self.host,
+            port=self.port,
+            x=x,
+            y=y,
+            **kwargs,
+        )
+
+    async def start_kuaishou_liked_capture(self) -> Any:
+        return await self._kuaishou_liked_capture("start")
+
+    async def read_kuaishou_liked_capture(self) -> Any:
+        return await self._kuaishou_liked_capture("read")
+
+    async def clear_kuaishou_liked_capture(self) -> Any:
+        return await self._kuaishou_liked_capture("clear")
+
+    async def _kuaishou_liked_capture(self, op: str) -> Any:
+        kwargs = {"tabId": self.tab_id} if self.tab_id is not None else {}
+        return await send_command(
+            "kuaishouLikedCapture",
+            workspace=self.workspace,
+            host=self.host,
+            port=self.port,
+            op=op,
+            **kwargs,
+        )
+
     async def wait(self, seconds: float) -> None:
         await asyncio.sleep(seconds)

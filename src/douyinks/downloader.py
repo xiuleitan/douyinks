@@ -34,8 +34,10 @@ class DownloadService:
         await self.ensure_daemon()
         await self.wait_for_extension_connection()
         if command.platform == "douyin":
-            return await self._download_douyin_likes(command.count)
+            return await self._download_douyin_likes(command)
         if command.platform == "kuaishou":
+            if command.source == "captured":
+                return await self._download_kuaishou_captured_likes(command.count)
             return await self._download_kuaishou_likes(command.count)
         raise ValueError(f"Unsupported platform: {command.platform}")
 
@@ -58,32 +60,41 @@ class DownloadService:
             f"然后重试。最后状态: {last_error}"
         )
 
-    async def _download_douyin_likes(self, count: int) -> dict:
+    async def _download_douyin_likes(self, command: DownloadCommand) -> dict:
         from .platforms.douyin import detail, download, scrape_ids
 
+        count = command.count
+        scrape_limit = command.range_end or count
+        range_start = command.range_start or 1
+        range_end = command.range_end or count
         page = BrowserPage(
             workspace=DOUYIN_WORKSPACE,
             host=self.settings.daemon_host,
             port=self.settings.daemon_port,
         )
-        ids = await scrape_ids.run(page, limit=count)
+        ids = await scrape_ids.run(page, limit=scrape_limit)
+        selected_ids = ids[range_start - 1:range_end]
         videos: list[dict] = []
-        for index, aweme_id in enumerate(ids, 1):
+        for index, aweme_id in enumerate(selected_ids, 1):
             try:
                 videos.extend(await detail.run(page, aweme_id=aweme_id))
             except Exception:
                 continue
-            if index < len(ids):
+            if index < len(selected_ids):
                 await asyncio.sleep(1)
 
         results = await download.download_videos(
             videos,
             self.settings.douyin_likes_dir,
             delay=self.settings.download_delay_seconds,
-            max_count=count,
+            max_count=len(selected_ids),
             history=DownloadHistory(self.settings.download_history_path),
         )
-        return {"platform": "douyin", "source": "like", "requested": count, "output_dir": self.settings.douyin_likes_dir, **results}
+        result = {"platform": "douyin", "source": "like", "requested": count, "output_dir": self.settings.douyin_likes_dir, **results}
+        if command.range_start is not None and command.range_end is not None:
+            result["range"] = f"{command.range_start}-{command.range_end}"
+            result["scraped"] = len(ids)
+        return result
 
     async def _download_kuaishou_likes(self, count: int) -> dict:
         from .platforms.kuaishou import download, liked
@@ -102,6 +113,50 @@ class DownloadService:
             history=DownloadHistory(self.settings.download_history_path),
         )
         return {"platform": "kuaishou", "source": "like", "requested": count, "output_dir": self.settings.kuaishou_likes_dir, **results}
+
+    async def start_kuaishou_liked_capture(self) -> dict:
+        await self.ensure_daemon()
+        await self.wait_for_extension_connection()
+
+        from .platforms.kuaishou import liked
+
+        page = BrowserPage(
+            workspace=KUAISHOU_WORKSPACE,
+            host=self.settings.daemon_host,
+            port=self.settings.daemon_port,
+        )
+        return await liked.start_capture(page)
+
+    async def _download_kuaishou_captured_likes(self, count: int) -> dict:
+        from .platforms.kuaishou import download, liked
+
+        page = BrowserPage(
+            workspace=KUAISHOU_WORKSPACE,
+            host=self.settings.daemon_host,
+            port=self.settings.daemon_port,
+        )
+        videos = await liked.read_captured(page, limit=count)
+        results = await download.download_videos(
+            videos,
+            self.settings.kuaishou_likes_dir,
+            delay=self.settings.download_delay_seconds,
+            max_count=count,
+            history=DownloadHistory(self.settings.download_history_path),
+        )
+        return {"platform": "kuaishou", "source": "captured", "requested": count, "output_dir": self.settings.kuaishou_likes_dir, **results}
+
+    async def count_kuaishou_liked_capture(self) -> dict:
+        await self.ensure_daemon()
+        await self.wait_for_extension_connection()
+
+        from .platforms.kuaishou import liked
+
+        page = BrowserPage(
+            workspace=KUAISHOU_WORKSPACE,
+            host=self.settings.daemon_host,
+            port=self.settings.daemon_port,
+        )
+        return await liked.captured_summary(page)
 
     async def status(self) -> dict:
         url = self.settings.daemon_status_url

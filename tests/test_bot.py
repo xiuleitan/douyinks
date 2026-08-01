@@ -46,6 +46,8 @@ class FakeSyncClient(FakeClient):
 class FakeDownloader:
     def __init__(self):
         self.commands = []
+        self.capture_started = 0
+        self.capture_count_requested = 0
 
     async def run(self, command):
         self.commands.append(command)
@@ -60,6 +62,14 @@ class FakeDownloader:
             "files": ["/tmp/downloads/douyin/likes/a.mp4"],
             "items": [{"filename": "a.mp4", "success": True}],
         }
+
+    async def start_kuaishou_liked_capture(self):
+        self.capture_started += 1
+        return {"tabId": 123, "url": "https://www.kuaishou.com/profile/abc", "captured": 0}
+
+    async def count_kuaishou_liked_capture(self):
+        self.capture_count_requested += 1
+        return {"video_count": 123, "response_count": 7, "error_count": 0}
 
 
 class FailingDownloader:
@@ -183,12 +193,98 @@ async def test_bot_queues_download_and_replies_with_summary():
     bodies = [content["body"] for _, _, content in client.sent]
     assert bodies == [
         "正在下载: douyin like 20",
-        "| 文件名 | 是否成功 |\n| --- | --- |\n| a.mp4 | 成功 |",
+        (
+            "| 序号 | 文件名 | 是否成功 |\n"
+            "| --- | --- | --- |\n"
+            "| 1 | a.mp4 | 成功 |\n"
+            "\n"
+            "总计：共 1 个，成功下载 1 个，跳过 0 个，失败 0 个。"
+        ),
     ]
     assert "com.talk.kind" not in client.sent[0][2]
     assert "com.talk.kind" not in client.sent[1][2]
     assert client.sent[1][2]["format"] == "org.matrix.custom.html"
     assert "<table>" in client.sent[1][2]["formatted_body"]
+
+
+@pytest.mark.asyncio
+async def test_bot_starts_kuaishou_capture_without_queueing_download():
+    client = FakeClient()
+    downloader = FakeDownloader()
+    runtime_services = FakeRuntimeServices()
+    bot = MatrixDownloadBot(make_settings(), client=client, downloader=downloader, runtime_services=runtime_services)
+
+    await bot.handle_text_message("!allowed:example", "@user:example", "kuaishou capture start")
+
+    assert downloader.capture_started == 1
+    assert downloader.commands == []
+    assert runtime_services.started == 1
+    assert runtime_services.scheduled == 1
+    assert client.sent == [
+        (
+            "!allowed:example",
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "快手点赞监听已启动，可以刷新网页、进入点赞页面并向下滚动鼠标了。加载完成后发送 download kuaishou captured <数量>。",
+            },
+        )
+    ]
+    assert "com.talk.kind" not in client.sent[0][2]
+
+
+@pytest.mark.asyncio
+async def test_bot_reports_kuaishou_captured_count_without_queueing_download():
+    client = FakeClient()
+    downloader = FakeDownloader()
+    runtime_services = FakeRuntimeServices()
+    bot = MatrixDownloadBot(make_settings(), client=client, downloader=downloader, runtime_services=runtime_services)
+
+    await bot.handle_text_message("!allowed:example", "@user:example", "captured num")
+
+    assert downloader.capture_count_requested == 1
+    assert downloader.commands == []
+    assert runtime_services.started == 1
+    assert runtime_services.scheduled == 1
+    assert client.sent == [
+        (
+            "!allowed:example",
+            "m.room.message",
+            {
+                "msgtype": "m.text",
+                "body": "当前已捕获 123 个快手点赞视频。",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bot_queues_kuaishou_captured_download():
+    client = FakeClient()
+    downloader = FakeDownloader()
+    runtime_services = FakeRuntimeServices()
+    bot = MatrixDownloadBot(make_settings(), client=client, downloader=downloader, runtime_services=runtime_services)
+
+    await bot.handle_text_message("!allowed:example", "@user:example", "download kuaishou captured 3")
+    await bot.queue.join()
+    await asyncio.wait_for(bot.stop_worker(), timeout=1)
+
+    assert downloader.commands == [DownloadCommand(platform="kuaishou", source="captured", count=3)]
+    assert client.sent[0][2]["body"] == "正在下载: kuaishou captured 3"
+
+
+@pytest.mark.asyncio
+async def test_bot_shows_range_in_download_start_message():
+    client = FakeClient()
+    downloader = FakeDownloader()
+    runtime_services = FakeRuntimeServices()
+    bot = MatrixDownloadBot(make_settings(), client=client, downloader=downloader, runtime_services=runtime_services)
+
+    await bot.handle_text_message("!allowed:example", "@user:example", "download douyin like 60-100")
+    await bot.queue.join()
+    await asyncio.wait_for(bot.stop_worker(), timeout=1)
+
+    assert client.sent[0][2]["body"] == "正在下载: douyin like 60-100"
 
 
 @pytest.mark.asyncio
@@ -213,21 +309,43 @@ def test_format_download_result_markdown_includes_failed_and_skipped_items():
     body, html = format_download_result_markdown(
         {
             "items": [
-                {"filename": "ok.mp4", "success": True},
-                {"filename": "skip.mp4", "success": False, "status": "skipped"},
-                {"filename": "bad.mp4", "success": False, "status": "failed"},
+                {"filename": "3xxr5j529n5wbx2_1781254040084_3xghaii7rshtb8g.mp4", "success": True},
+                {"filename": "skip_1781254040084_abc.mp4", "success": False, "status": "skipped"},
+                {"filename": "bad_1781254040084_def.mp4", "success": False, "status": "failed"},
             ]
         }
     )
 
     assert body == (
-        "| 文件名 | 是否成功 |\n"
-        "| --- | --- |\n"
-        "| ok.mp4 | 成功 |\n"
-        "| skip.mp4 | 跳过 |\n"
-        "| bad.mp4 | 失败 |"
+        "| 序号 | 文件名 | 是否成功 |\n"
+        "| --- | --- | --- |\n"
+        "| 1 | 3xxr5j529n5wbx2 | 成功 |\n"
+        "| 2 | skip | 跳过 |\n"
+        "| 3 | bad | 失败 |\n"
+        "\n"
+        "总计：共 3 个，成功下载 1 个，跳过 1 个，失败 1 个。"
     )
-    assert "<td>ok.mp4</td>" in html
+    assert "<th>序号</th>" in html
+    assert "<td>3</td><td>bad</td><td>失败</td>" in html
+    assert "<td>3xxr5j529n5wbx2</td>" in html
+    assert "<p>总计：共 3 个，成功下载 1 个，跳过 1 个，失败 1 个。</p>" in html
+    assert "1781254040084" not in body
+    assert "1781254040084" not in html
+
+
+def test_format_download_result_markdown_uses_download_result_counts_for_summary():
+    body, html = format_download_result_markdown(
+        {
+            "success": 2,
+            "skipped": 1,
+            "failed": 3,
+            "items": [{"filename": "first.mp4", "success": True}],
+        }
+    )
+
+    summary = "总计：共 6 个，成功下载 2 个，跳过 1 个，失败 3 个。"
+    assert body.endswith(summary)
+    assert f"<p>{summary}</p>" in html
 
 
 @pytest.mark.asyncio

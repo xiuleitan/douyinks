@@ -214,6 +214,44 @@ def download_kuaishou_liked(liked_file, line_range, delay, log_level):
     console.print(f"保存目录: {result['output_dir']}")
 
 
+@cli.command("start-kuaishou-liked-capture")
+@click.option("--log-level", default="INFO", show_default=True, help="日志级别，例如 DEBUG、INFO、WARNING。")
+def start_kuaishou_liked_capture(log_level):
+    """开始监听已打开快手页面中的 liked 响应。"""
+    from .downloader import DownloadService
+
+    configure_logging(log_level)
+    settings = Settings.load()
+    result = run_async(DownloadService(settings).start_kuaishou_liked_capture())
+    console.print(
+        "快手点赞监听已启动，可以刷新网页、进入点赞页面并向下滚动鼠标了。"
+        "加载完成后运行 download-kuaishou-captured。"
+    )
+    if result.get("url"):
+        console.print(f"监听页面: {result['url']}")
+
+
+@cli.command("download-kuaishou-captured")
+@click.argument("count", type=int)
+@click.option("--log-level", default="INFO", show_default=True, help="日志级别，例如 DEBUG、INFO、WARNING。")
+def download_kuaishou_captured(count, log_level):
+    """下载扩展已捕获的快手 liked 响应。"""
+    from .commands import DownloadCommand
+    from .downloader import DownloadService
+
+    configure_logging(log_level)
+    settings = Settings.load()
+    result = run_async(DownloadService(settings).run(DownloadCommand(platform="kuaishou", source="captured", count=count)))
+    console.print(
+        "下载完成: "
+        f"请求 {result['requested']}，"
+        f"成功 {result['success']}，"
+        f"失败 {result['failed']}，"
+        f"跳过 {result['skipped']}。"
+    )
+    console.print(f"保存目录: {result['output_dir']}")
+
+
 @cli.command("redownload-unknown-history")
 @click.argument("history_file", type=click.Path(exists=True, dir_okay=False))
 @click.argument("platform", type=click.Choice(["douyin", "kuaishou", "all"]))
