@@ -9,6 +9,12 @@
 
 Download liked Douyin and Kuaishou content from a local Mac terminal. Run `douyinks` in one terminal to start the browser bridge, then run download commands in another. Files are saved directly to the Mac.
 
+## Why this project exists
+
+A video you liked may disappear when you return to it later: the creator may delete it, it may be taken down, or it may become inaccessible. This project helps you save liked videos locally while they are still available, so you can watch them offline and organize them later.
+
+After installing the tool and loading the extension, log into your own Douyin or Kuaishou account in the browser. The tool uses that existing browser session to download liked content in batches. Douyin automatically reads and scrolls your liked list. Kuaishou's default workflow requires starting capture, opening the liked tab and scrolling to load entries, then running the download command.
+
 ## Install
 
 Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), and Chrome or a compatible Chromium browser.
@@ -22,6 +28,28 @@ uv tool install --editable .
 Ensure `~/.local/bin` is on PATH. If uv reports otherwise, run `uv tool update-shell` and open a new terminal. You can then use the single `douyinks` entry point from any directory. Remove any old shell function that redirects `douyinks` to `douyinks bot`, then reopen the terminal.
 
 At `chrome://extensions`, enable developer mode and load the project's `extension/` directory as an unpacked extension. Keep Chrome open and log into the platforms you want to use.
+
+## Illustrated example
+
+### 1. Browser login and liked videos
+
+Log into your own Douyin account in Chrome with the extension loaded, then open **My profile → Likes** (我的 → 喜欢). The screenshot shows liked content ready to back up, with account details blurred. The tool reads content through your local browser session.
+
+![A logged-in Douyin profile with the Likes tab open and videos ready to back up](docs/images/douyin-liked-page.png)
+
+### 2. Download command, progress, and results
+
+Run `douyinks` in the first terminal and keep it open. In the upper window below, `Extension connected` confirms the browser extension is connected. Run the following command in a second terminal to attempt to download five liked Douyin entries:
+
+```bash
+douyinks douyin download 5
+```
+
+![Two terminals showing the connected browser bridge, download progress, and final summary](docs/images/douyin-cli-download.png)
+
+This run requested **5 entries** and finished with **4 successful, 1 failed, and 0 skipped**. Fetching one entry's details failed with `Detached while handling command`; the other four downloads continued. The `4/4` progress refers to the four entries that reached the download stage. The final summary also counts the detail-fetch failure, so it still reports five requested and one failed.
+
+The summary includes the output directory, elapsed time, and completion time. This screenshot uses a custom output directory; the default root is `~/Downloads/douyinks`. Run `douyinks douyin summary` to view the result later, or repeat the download command to retry. Successfully downloaded entries whose files still exist locally are skipped.
 
 ## Daily use
 
