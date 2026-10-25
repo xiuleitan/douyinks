@@ -11,10 +11,6 @@ from douyinks.platforms.kuaishou import liked_batch
 
 def make_settings(tmp_path):
     return Settings.from_mapping({
-        "MATRIX_HOMESERVER_URL": "https://matrix.example",
-        "MATRIX_USERNAME": "@bot:example",
-        "MATRIX_PASSWORD": "secret",
-        "MATRIX_ALLOWED_ROOM_IDS": "!room:example",
         "DOWNLOAD_ROOT": str(tmp_path / "downloads"),
     })
 

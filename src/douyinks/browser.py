@@ -28,7 +28,8 @@ def _urls(host: str = DEFAULT_DAEMON_HOST, port: int = DEFAULT_DAEMON_PORT) -> t
 
 async def check_daemon(host: str = DEFAULT_DAEMON_HOST, port: int = DEFAULT_DAEMON_PORT) -> bool:
     ping_url, _ = _urls(host, port)
-    async with httpx.AsyncClient() as client:
+    # The browser bridge must be reached directly, even with a system proxy.
+    async with httpx.AsyncClient(trust_env=False) as client:
         try:
             response = await client.get(ping_url, timeout=2.0)
             return response.status_code == 200
@@ -54,7 +55,7 @@ async def send_command(
         **kwargs,
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         try:
             response = await client.post(
                 command_url,
@@ -63,7 +64,7 @@ async def send_command(
                 timeout=timeout + 5,
             )
         except httpx.ConnectError as exc:
-            raise DaemonNotRunningError("无法连接 Douyinks daemon，请先启动 douyinks daemon") from exc
+            raise DaemonNotRunningError("无法连接本地后台，请先在另一个终端执行 douyinks 并保持运行。") from exc
 
     result = response.json()
     if not result.get("ok"):

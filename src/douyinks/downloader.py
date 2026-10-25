@@ -1,34 +1,27 @@
 import asyncio
-import subprocess
-import sys
+import logging
 
 import httpx
 
-from .browser import BrowserPage, check_daemon
+from .browser import BrowserPage, DaemonNotRunningError, check_daemon
 from .commands import DownloadCommand
 from .config import DOUYIN_WORKSPACE, KUAISHOU_WORKSPACE, Settings
 from .history import DownloadHistory
+from .platforms.common import DownloadProgress
+
+logger = logging.getLogger("douyinks.downloader")
 
 
 class DownloadService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, progress: DownloadProgress | None = None):
         self.settings = settings
+        self.progress = progress
 
     async def ensure_daemon(self) -> None:
         if await check_daemon(self.settings.daemon_host, self.settings.daemon_port):
             return
 
-        subprocess.Popen(
-            build_daemon_command(self.settings),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        for _ in range(20):
-            await asyncio.sleep(0.5)
-            if await check_daemon(self.settings.daemon_host, self.settings.daemon_port):
-                return
-        raise RuntimeError("Douyinks daemon 启动超时，请手动运行: douyinks daemon")
+        raise DaemonNotRunningError("本地后台未运行，请先在另一个终端执行 douyinks 并保持运行。")
 
     async def run(self, command: DownloadCommand) -> dict:
         await self.ensure_daemon()
@@ -74,11 +67,16 @@ class DownloadService:
         )
         ids = await scrape_ids.run(page, limit=scrape_limit)
         selected_ids = ids[range_start - 1:range_end]
+        if not selected_ids:
+            raise RuntimeError("未读取到指定范围内的抖音点赞内容，请确认浏览器已登录、点赞列表可见且范围内有内容。")
         videos: list[dict] = []
+        detail_failures = 0
         for index, aweme_id in enumerate(selected_ids, 1):
             try:
                 videos.extend(await detail.run(page, aweme_id=aweme_id))
-            except Exception:
+            except Exception as exc:
+                detail_failures += 1
+                logger.warning("读取抖音内容 %s 失败: %s", aweme_id, exc)
                 continue
             if index < len(selected_ids):
                 await asyncio.sleep(1)
@@ -89,8 +87,11 @@ class DownloadService:
             delay=self.settings.download_delay_seconds,
             max_count=len(selected_ids),
             history=DownloadHistory(self.settings.download_history_path),
+            progress=self.progress,
         )
-        result = {"platform": "douyin", "source": "like", "requested": count, "output_dir": self.settings.douyin_likes_dir, **results}
+        results["failed"] += detail_failures
+        result = {"platform": "douyin", "source": "like", "requested": count, "available": len(selected_ids),
+                  "output_dir": self.settings.douyin_likes_dir, **results}
         if command.range_start is not None and command.range_end is not None:
             result["range"] = f"{command.range_start}-{command.range_end}"
             result["scraped"] = len(ids)
@@ -105,14 +106,18 @@ class DownloadService:
             port=self.settings.daemon_port,
         )
         videos = await liked.run(page, limit=count)
+        if not videos:
+            raise RuntimeError("未读取到快手点赞内容，请确认浏览器已登录且点赞列表可见。")
         results = await download.download_videos(
             videos,
             self.settings.kuaishou_likes_dir,
             delay=self.settings.download_delay_seconds,
             max_count=count,
             history=DownloadHistory(self.settings.download_history_path),
+            progress=self.progress,
         )
-        return {"platform": "kuaishou", "source": "like", "requested": count, "output_dir": self.settings.kuaishou_likes_dir, **results}
+        return {"platform": "kuaishou", "source": "like", "requested": count, "available": len(videos),
+                "output_dir": self.settings.kuaishou_likes_dir, **results}
 
     async def start_kuaishou_liked_capture(self) -> dict:
         await self.ensure_daemon()
@@ -142,8 +147,10 @@ class DownloadService:
             delay=self.settings.download_delay_seconds,
             max_count=count,
             history=DownloadHistory(self.settings.download_history_path),
+            progress=self.progress,
         )
-        return {"platform": "kuaishou", "source": "captured", "requested": count, "output_dir": self.settings.kuaishou_likes_dir, **results}
+        return {"platform": "kuaishou", "source": "captured", "requested": count, "available": len(videos),
+                "output_dir": self.settings.kuaishou_likes_dir, **results}
 
     async def count_kuaishou_liked_capture(self) -> dict:
         await self.ensure_daemon()
@@ -160,20 +167,7 @@ class DownloadService:
 
     async def status(self) -> dict:
         url = self.settings.daemon_status_url
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             response = await client.get(url, headers={"X-Douyinks": "1"}, timeout=5.0)
             response.raise_for_status()
             return response.json()
-
-
-def build_daemon_command(settings: Settings) -> list[str]:
-    return [
-        sys.executable,
-        "-m",
-        "douyinks",
-        "daemon",
-        "--host",
-        settings.daemon_host,
-        "--port",
-        str(settings.daemon_port),
-    ]

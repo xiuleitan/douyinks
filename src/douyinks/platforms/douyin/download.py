@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from pypinyin import lazy_pinyin
 
 from ...history import DownloadHistory
-from ..common import download_single, pause_between_items, sanitize_filename
+from ..common import DownloadProgress, download_single, pause_between_items, sanitize_filename
 
 
 async def download_videos(
@@ -14,6 +14,7 @@ async def download_videos(
     delay: float = 2.0,
     max_count: int = 0,
     history: DownloadHistory | None = None,
+    progress: DownloadProgress | None = None,
 ) -> dict:
     if max_count > 0:
         videos = videos[:max_count]
@@ -30,6 +31,8 @@ async def download_videos(
 
     results = {"success": 0, "failed": 0, "skipped": 0, "files": [], "items": []}
     for index, video in enumerate(videos, 1):
+        if progress:
+            progress(index - 1, len(videos), results)
         aweme_id = video.get("aweme_id", "")
         play_url = video.get("play_url", "")
         author_id = _author_prefix(video.get("author_douyin_id", ""), video.get("author", ""))
@@ -102,6 +105,8 @@ async def download_videos(
             results["items"].append({"filename": filename, "success": False, "status": "failed"})
         await pause_between_items(index, len(videos), delay)
 
+    if progress:
+        progress(len(videos), len(videos), results)
     return results
 
 

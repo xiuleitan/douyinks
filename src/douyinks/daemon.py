@@ -1,32 +1,17 @@
 import asyncio
 import json
 import logging
-import signal
-import sys
 from typing import Any
 
 from aiohttp import WSMsgType, web
 
-from .config import CUSTOM_HEADER, DAEMON_IDLE_TIMEOUT, DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
+from .config import CUSTOM_HEADER, DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
 
 logger = logging.getLogger("douyinks.daemon")
 extension_ws: web.WebSocketResponse | None = None
 extension_version: str | None = None
 pending: dict[str, asyncio.Future] = {}
-idle_handle: asyncio.TimerHandle | None = None
 MAX_BODY = 1024 * 1024
-
-
-def reset_idle_timer(loop: asyncio.AbstractEventLoop) -> None:
-    global idle_handle
-    if idle_handle:
-        idle_handle.cancel()
-    idle_handle = loop.call_later(DAEMON_IDLE_TIMEOUT, _idle_shutdown)
-
-
-def _idle_shutdown() -> None:
-    logger.info("Idle timeout, shutting down")
-    sys.exit(0)
 
 
 def check_origin(request: web.Request) -> str | None:
@@ -72,13 +57,14 @@ async def handle_command(request: web.Request) -> web.Response:
     header_err = check_custom_header(request)
     if header_err:
         return web.json_response({"ok": False, "error": header_err}, status=403)
-    reset_idle_timer(asyncio.get_running_loop())
 
     try:
         body = await request.json()
     except Exception:
         return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
 
+    if not isinstance(body, dict):
+        return web.json_response({"ok": False, "error": "Expected a JSON object"}, status=400)
     cmd_id = body.get("id")
     if not cmd_id:
         return web.json_response({"ok": False, "error": "Missing command id"}, status=400)
@@ -151,21 +137,23 @@ async def handle_ext_ws(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+async def close_extension_connection(app: web.Application) -> None:
+    if extension_ws is not None and not extension_ws.closed:
+        await extension_ws.close(code=1001, message=b"Douyinks stopped")
+
+
 def create_app() -> web.Application:
     app = web.Application(client_max_size=MAX_BODY)
     app.router.add_get("/ping", handle_ping)
     app.router.add_get("/status", handle_status)
     app.router.add_post("/command", handle_command)
     app.router.add_get("/ext", handle_ext_ws)
+    app.on_shutdown.append(close_extension_connection)
     return app
 
 
 def main(host: str = DEFAULT_DAEMON_HOST, port: int = DEFAULT_DAEMON_PORT) -> None:
-    logging.basicConfig(level=logging.INFO, format="[douyinks-daemon] %(message)s", stream=sys.stderr)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    reset_idle_timer(loop)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    logging.basicConfig(level=logging.INFO, format="[douyinks-daemon] %(message)s")
     logger.info(f"Listening on http://{host}:{port}")
     web.run_app(create_app(), host=host, port=port, print=None)
 

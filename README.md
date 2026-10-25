@@ -2,251 +2,176 @@
 
 [English](README.en.md)
 
+![macOS](https://img.shields.io/badge/macOS-local-blue)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
 ![uv](https://img.shields.io/badge/uv-managed-green)
-![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
-![Matrix](https://img.shields.io/badge/Matrix-bot-blue)
 ![Chrome Extension](https://img.shields.io/badge/Chrome-extension-green)
 
-douyinks 是一个通过 Matrix 消息触发的抖音和快手视频下载工具。它包含命令行程序、本地浏览器桥接 daemon 和 Chrome 扩展，用于在已登录的浏览器会话中读取页面与接口数据。
+在 Mac 本机通过命令行下载抖音和快手的点赞内容。第一个终端运行 `douyinks` 启动本地浏览器桥接后台，第二个终端执行下载命令。下载文件直接保存在 Mac。
 
-## 功能
+## 安装
 
-- 从准备好的抖音链接列表下载喜欢的视频、图文 note 和图片。
-- 将快手喜欢列表导出为可续跑的 JSONL 清单。
-- 根据导出的快手 JSONL 清单分段下载视频。
-- 在允许的 Matrix 房间中发送文本命令触发下载。
-- 在 `DOWNLOAD_ROOT` 下记录进度、历史和 Matrix 同步状态，方便续跑和去重。
-- 通过本地 Chrome 扩展桥接已登录的抖音/快手浏览器会话。
+需要 Python 3.12+、[uv](https://docs.astral.sh/uv/) 和 Chrome（或兼容的 Chromium 浏览器）。
 
-## 环境要求
-
-- Python 3.12 或更新版本
-- [uv](https://docs.astral.sh/uv/) 依赖和虚拟环境管理工具
-- Google Chrome 或 Chromium 系浏览器，用于加载扩展桥接
-- 一个 Matrix 账号，用于 bot 模式
-- 已登录的抖音/快手浏览器会话，用于需要账号状态的平台操作
-
-## 安装与配置
-
-安装依赖和开发工具：
+在项目目录安装命令：
 
 ```bash
-uv sync --extra dev
+uv tool install --editable .
 ```
 
-复制示例环境变量文件，并填写本地配置：
+确保 `~/.local/bin` 位于 `PATH` 中；如果安装提示命令目录不在 PATH 中，可运行 `uv tool update-shell`，然后重新打开终端。安装后可在任意目录使用统一入口 `douyinks`。如果以前在 `~/.zshrc` 中定义过指向 `douyinks bot` 的同名函数，请删除旧函数并重新打开终端。
+
+在 `chrome://extensions` 开启开发者模式，点击“加载已解压的扩展程序”，选择本项目的 `extension/` 目录。保持 Chrome 运行，并在浏览器中登录需要下载的平台。
+
+## 日常使用
+
+随时运行以下命令，列出全部可用命令和常用示例：
+
+```bash
+douyinks help
+```
+
+查看某条命令的参数，例如：
+
+```bash
+douyinks help douyin download
+```
+
+第一个终端启动后台，并保持运行：
+
+```bash
+douyinks
+```
+
+后台默认监听 `127.0.0.1:19826`，持续运行至按 `Ctrl+C` 停止。它负责连接本机 Chrome 扩展；下载任务在第二个终端中运行，终端会显示结果。下载期间保持两个终端和 Chrome 打开。
+
+第二个终端检查连接状态：
+
+```bash
+douyinks status
+```
+
+下载抖音点赞内容：
+
+```bash
+douyinks douyin download 300
+```
+
+命令会打开抖音自己的点赞列表并自动滚动读取。需要分段时，可指定从第几条开始，例如下载第 60–100 条：
+
+```bash
+douyinks douyin download 41 --start 60
+```
+
+快手使用“监听网页加载结果”的方式。先在 Chrome 中打开已登录的快手网页，然后启动监听：
+
+```bash
+douyinks kuaishou capture start
+```
+
+刷新快手网页，进入自己的点赞页面并向下滚动加载视频。查询已捕获的唯一视频数量：
+
+```bash
+douyinks kuaishou count
+```
+
+数量足够、等待中的响应处理完成后，下载：
+
+```bash
+douyinks kuaishou download 300
+```
+
+`count` 查询的是本次监听捕获的数量，不是账号全部点赞数量。下载默认读取监听缓存；重新加载扩展或关闭监听页面后，可能需要重新启动监听并加载。只有需要重新收集列表时才再次运行 `douyinks kuaishou capture start`。
+
+也保留快手直接通过接口读取点赞列表的方式：
+
+```bash
+douyinks kuaishou download 300 --source like
+```
+
+下载数量沿用每次 **1–500** 条的限制。`300` 表示最多选取 300 条点赞内容进行处理；已下载的内容会跳过，列表不足、内容不可用或请求失败时实际新增文件会更少。抖音图文和混合内容可能对应多个媒体文件。两个平台的下载命令请依次运行。
+
+## 下载进度与汇总
+
+进度和最终汇总显示在**执行下载命令的终端**。运行 `douyinks` 的第一个终端负责浏览器桥接；其中的 HTTP 200 日志只表示请求成功，不代表视频已经下载完。
+
+下载时会持续显示已处理数量，以及成功、失败、跳过计数。任务结束后会输出醒目的“下载汇总”，包括请求数量、实际获取数量、成功、失败、跳过、耗时和保存目录。默认收起 HTTP 请求日志，需要排查时可加 `--log-level DEBUG`。
+
+每次按数量下载的任务结束后，会保存最近一次结果；部分视频失败时也会保存。之后可以随时查询：
+
+```bash
+douyinks kuaishou summary
+douyinks douyin summary
+```
+
+汇总文件分别为 `DOWNLOAD_ROOT/kuaishou_last_download.json` 和 `DOWNLOAD_ROOT/douyin_last_download.json`。`summary` 显示最近一次已完成任务的统计和完成时间；进行中的任务请查看下载终端进度。升级前已启动的任务继续使用原有逻辑，新的进度显示和汇总保存从下次启动任务起生效。
+
+## 配置
+
+开发目录安装默认读取项目根目录的 `.env`，不受终端当前目录影响。配置文件可选；已有 `.env` 中的下载目录继续生效。新环境可以复制 `.env.example` 后修改：
 
 ```bash
 cp .env.example .env
 ```
 
-在 `chrome://extensions` 中加载 `extension/` 目录。打开开发者模式，选择“加载已解压的扩展程序”，然后选择项目里的 `extension` 目录。
+已有 `.env` 时请直接编辑，避免覆盖原来的下载目录。普通非 editable 安装默认读取 `~/.config/douyinks/.env`。可通过 `DOUYINKS_ENV_FILE=/absolute/path/to/.env` 指定其他配置文件；两个终端使用同一份配置。系统环境变量优先于配置文件。
 
-## 配置项
-
-`douyinks` 默认从 `.env` 读取配置。请把 `.env` 作为本地私密文件保存，仓库里只提交 `.env.example`。
-
-| 变量 | 必填 | 说明 |
+| 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `MATRIX_HOMESERVER_URL` | 是 | Matrix homeserver 地址。 |
-| `MATRIX_USERNAME` | 是 | Matrix bot 账号。 |
-| `MATRIX_PASSWORD` | 是 | Matrix bot 账号密码。 |
-| `MATRIX_ALLOWED_ROOM_IDS` | 是 | 允许触发下载的 Matrix 房间 ID，多个值用英文逗号分隔。 |
-| `DOWNLOAD_ROOT` | 是 | 下载文件、进度、历史和同步状态的根目录。 |
-| `DOUYINKS_DAEMON_HOST` | 否 | 本地 daemon 监听地址，默认 `127.0.0.1`。 |
-| `DOUYINKS_DAEMON_PORT` | 否 | 本地 daemon 端口，默认 `19826`。 |
-| `DOWNLOAD_DELAY_SECONDS` | 否 | Matrix 触发下载时每条之间的等待秒数，默认 `3`。 |
-| `SYNC_SERVER_ENABLED` | 否 | 是否启用手机端拉取用的同步服务，默认 `false`。 |
-| `SYNC_SERVER_HOST` | 否 | 同步服务监听地址；局域网访问通常设为 `0.0.0.0`。 |
-| `SYNC_SERVER_PORT` | 否 | 同步服务端口，默认 `19827`。 |
-| `SYNC_TOKEN` | 否 | 手机 APP 调用同步接口时使用的固定 Bearer Token。 |
-| `TRANSIENT_SERVICE_IDLE_SECONDS` | 否 | bot 临时启动 daemon 和 sync-server 后的空闲保留秒数，默认 `1800`。 |
+| `DOWNLOAD_ROOT` | `~/Downloads/douyinks` | 下载、历史记录和批量进度的根目录。支持 `~`；相对路径以配置文件目录为基准。 |
+| `DOUYINKS_DAEMON_HOST` | `127.0.0.1` | 本地桥接地址。 |
+| `DOUYINKS_DAEMON_PORT` | `19826` | 本地桥接端口。Chrome 扩展默认使用此端口。 |
+| `DOWNLOAD_DELAY_SECONDS` | `3` | 按数量下载时，媒体项之间的等待秒数。 |
 
-示例：
+扩展固定连接 `localhost:19826`；通常保持默认地址和端口即可。如果调试时修改端口，需要同时修改 `extension/background.js` 中的端口并重新加载扩展。也可运行 `douyinks daemon --host 127.0.0.1 --port 19826` 显式启动后台。
 
-```env
-MATRIX_HOMESERVER_URL=https://matrix.example
-MATRIX_USERNAME=@douyinks:example
-MATRIX_PASSWORD=replace-with-your-matrix-password
-MATRIX_ALLOWED_ROOM_IDS=!roomid:example
-DOWNLOAD_ROOT=/path/to/downloads
-DOUYINKS_DAEMON_HOST=127.0.0.1
-DOUYINKS_DAEMON_PORT=19826
-DOWNLOAD_DELAY_SECONDS=3
-SYNC_SERVER_ENABLED=false
-SYNC_SERVER_HOST=0.0.0.0
-SYNC_SERVER_PORT=19827
-SYNC_TOKEN=replace-with-a-long-random-sync-token
-TRANSIENT_SERVICE_IDLE_SECONDS=1800
-```
-
-## 使用方法
-
-请在项目根目录运行命令。
-
-启动浏览器桥接 daemon：
-
-```bash
-uv run douyinks daemon
-```
-
-显式指定监听地址和端口：
-
-```bash
-uv run douyinks daemon --host 127.0.0.1 --port 19826
-```
-
-检查 daemon 是否运行、扩展是否已连接：
-
-```bash
-uv run douyinks status
-```
-
-下载准备好的抖音链接列表：
-
-```bash
-uv run douyinks download-links douyin_links.txt
-```
-
-只下载链接列表中的指定行号范围：
-
-```bash
-uv run douyinks download-links douyin_links.txt 1-20
-uv run douyinks download-links douyin_links.txt 21-40
-```
-
-设置自定义间隔或进度文件：
-
-```bash
-uv run douyinks download-links douyin_links.txt --delay 2 --progress-file /path/to/progress.json
-```
-
-重新下载历史记录中 `unknown` 前缀的文件到单独目录：
-
-```bash
-uv run douyinks redownload-unknown-history /path/to/downloads/download_history.json douyin 1-20 --output-dir /path/to/downloads/redownload_unknown
-```
-
-这里的 `1-20` 是在筛选出 `unknown` 记录后的序号范围，不是原始 JSON 文件行号。命令会按平台保存到独立子目录，例如 `redownload_unknown/douyin`。如果选择 `kuaishou`，历史记录中必须带有可下载的 `play_url`，否则无法只凭历史记录重新下载。
-
-导出快手喜欢列表：
-
-```bash
-uv run douyinks export-kuaishou-liked kuaishou_liked.jsonl
-```
-
-如果导出中断，重新运行同一条命令即可续跑。只有在需要覆盖已有清单并重新开始时才使用 `--fresh`。
-
-分段下载快手清单：
-
-```bash
-uv run douyinks download-kuaishou-liked kuaishou_liked.jsonl 1-100
-uv run douyinks download-kuaishou-liked kuaishou_liked.jsonl 101-200
-```
-
-启动 Matrix bot：
-
-```bash
-uv run douyinks bot
-```
-
-日常使用时推荐只常驻 Matrix bot。收到下载命令后，bot 会临时启动浏览器桥接 daemon；如果 `SYNC_SERVER_ENABLED=true`，也会临时启动手机同步服务。下载完成后会保留 `TRANSIENT_SERVICE_IDLE_SECONDS` 秒，默认半小时，方便手机 APP 拉取新增文件；空闲时间到后会自动停止由 bot 启动的 daemon 和 sync-server。
-
-排查问题时可开启 debug 日志：
-
-```bash
-uv run douyinks bot --log-level DEBUG
-```
-
-如需调试，也可以一次启动浏览器桥接 daemon、Matrix bot 和手机同步服务：
-
-```bash
-uv run douyinks serve
-```
-
-启动手机 APP 局域网拉取用的同步服务：
-
-```bash
-uv run douyinks sync-server
-```
-
-手机端接口说明见 [Mobile Sync API](docs/mobile-sync-api.md)。同步服务使用 `Authorization: Bearer <SYNC_TOKEN>` 保护接口；手机 APP 端手动填写笔记本同步服务地址，例如 `http://192.168.1.23:19827`。如果局域网 IP 变化，可以在 Matrix 房间发送 `ip` 或 `查询 ip` 获取当前地址。
-
-同步服务第一次启动时会把已有下载记录作为基线处理，不会把历史文件全部列为待同步；之后新增下载才会出现在手机端的 pending 列表中。
-
-## Matrix 命令
-
-在允许的 Matrix 房间中发送以下消息：
-
-```text
-download douyin like 20
-download kuaishou like 20
-kuaishou capture start
-captured num
-download kuaishou captured 200
-ip
-```
-
-数量必须是正整数，且不能超过 `500`。发送 `captured num` 可以查看当前快手点赞监听已捕获的唯一视频数量；数量不够时继续在浏览器加载，够了再发送 `download kuaishou captured <数量>`。
-
-发送 `ip` 或 `查询 ip` 时，bot 会返回当前笔记本的局域网 IP。如果 `SYNC_SERVER_ENABLED=true`，回复中也会包含手机 APP 可填写的同步服务地址，例如 `http://192.168.1.23:19827`。
-
-bot 的主动回复使用普通 `m.room.message` 文本或 Markdown 消息，不额外添加 `com.talk.kind` 等客户端私有通知元数据。
-
-## 输出与续跑文件
-
-下载文件会保存到：
+输出目录：
 
 - `DOWNLOAD_ROOT/douyin/likes`
 - `DOWNLOAD_ROOT/kuaishou/likes`
+- `DOWNLOAD_ROOT/download_history.json`：成功下载历史，用于去重。
 
-运行状态也会写入 `DOWNLOAD_ROOT`：
+## 保留的批量下载命令
 
-- `download_history.json` 记录已成功下载的文件，用于去重。
-- `matrix_sync_state.json` 保存 Matrix 同步 token，避免重启后重复处理旧消息。
-- `douyin_links_progress.json` 记录抖音链接列表批量任务的续跑进度，除非命令中指定了其他进度文件。
-
-## 开发
-
-运行测试：
+这些命令也在本机执行。需要访问网页的命令应先启动 `douyinks` 并连接扩展。
 
 ```bash
+# 下载抖音链接列表；可指定行号范围
+douyinks download-links douyin_links.txt
+douyinks download-links douyin_links.txt 1-20
+
+# 导出快手点赞清单；中断后执行相同命令续跑
+douyinks export-kuaishou-liked kuaishou_liked.jsonl
+
+# 从快手清单分段下载
+douyinks download-kuaishou-liked kuaishou_liked.jsonl 1-100
+
+# 将历史中 unknown 前缀的文件重新下载到单独目录
+douyinks redownload-unknown-history /path/to/download_history.json douyin 1-20 --output-dir /path/to/redownload
+```
+
+链接列表任务的默认进度文件为 `DOWNLOAD_ROOT/douyin_links_progress.json`，可通过 `--progress-file` 指定。`redownload-unknown-history` 的范围作用于筛选出的 unknown 记录；快手记录需要包含 `play_url`。
+
+兼容原有本地命令 `douyinks start-kuaishou-liked-capture` 和 `douyinks download-kuaishou-captured 300`；所有命令统一使用 `douyinks` 前缀。
+
+## 开发与排查
+
+```bash
+uv sync --extra dev
 uv run pytest
+node --test tests/extension/cdp.test.mjs
 ```
 
-查看命令行帮助：
+不安装全局命令时，可使用 `uv run douyinks`、`uv run douyinks douyin download 300`、`uv run douyinks kuaishou count` 等命令。
+
+查看帮助或开启详细日志：
 
 ```bash
-uv run douyinks --help
+douyinks --help
+douyinks douyin download --help
+douyinks kuaishou --help
+douyinks --log-level DEBUG
+douyinks douyin download 20 --log-level DEBUG
 ```
 
-项目使用 `uv.lock` 锁定依赖；如果依赖变更是有意的，请一并提交该文件。
-
-如果希望打开终端后在任意目录直接启动，可以在 `~/.zshrc` 中添加一个函数，让它自动进入项目目录再运行：
-
-```bash
-douyinks-serve() {
-  cd /path/to/douyinks && uv run douyinks bot
-}
-```
-
-重新打开终端，或运行 `source ~/.zshrc` 后，即可直接执行：
-
-```bash
-douyinks-serve
-```
-
-这种方式比单纯把命令加入 PATH 更适合当前项目，因为 `douyinks` 默认从项目目录读取 `.env`。日常推荐启动 `bot`；它会在收到下载命令后按需拉起 daemon 和 sync-server。
-
-## 隐私与安全
-
-- 不要提交 `.env`，其中包含 Matrix 凭据和本地路径。
-- 不要提交导出的喜欢列表清单、浏览器页面快照、已下载视频、进度文件或历史文件。这些文件可能暴露账号活动、喜欢内容、带签名的媒体 URL、本地路径或个人偏好。
-- 同步服务会在局域网暴露下载文件拉取接口，请设置足够长的 `SYNC_TOKEN`，并只在可信网络中开启。
-- Chrome 扩展申请了 `debugger`、`tabs`、`cookies` 和 `<all_urls>` 权限，用于桥接已登录浏览器会话。请只从可信的本地代码加载该扩展。
-- 如果真实凭据曾经进入 git 历史，请在发布前轮换这些凭据。
-
-## 许可证
-
-当前仓库尚未包含许可证文件。如果希望他人使用、修改或分发本项目，请在发布前添加许可证。
+后台未运行时，下载命令会提示先在另一终端运行 `douyinks`。扩展未连接时，请检查 Chrome 和扩展是否已开启；按数量下载发生失败时，命令会输出错误并返回非零退出码。

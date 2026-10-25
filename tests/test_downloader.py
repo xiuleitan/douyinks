@@ -2,35 +2,26 @@ import pytest
 
 from douyinks.config import Settings
 from douyinks.commands import DownloadCommand
-from douyinks.downloader import DownloadService, build_daemon_command
+from douyinks.downloader import DownloadService
+from douyinks.browser import DaemonNotRunningError
 
 
-def test_build_daemon_command_uses_configured_host_and_port():
-    settings = Settings.from_mapping(
-        {
-            "MATRIX_HOMESERVER_URL": "https://matrix.example",
-            "MATRIX_USERNAME": "@bot:example",
-            "MATRIX_PASSWORD": "secret",
-            "MATRIX_ALLOWED_ROOM_IDS": "!allowed:example",
-            "DOWNLOAD_ROOT": "/tmp/downloads",
-            "DOUYINKS_DAEMON_HOST": "127.0.0.2",
-            "DOUYINKS_DAEMON_PORT": "19999",
-        }
-    )
+@pytest.mark.asyncio
+async def test_missing_daemon_requests_explicit_startup(monkeypatch):
+    service = DownloadService(Settings.from_mapping({}))
 
-    command = build_daemon_command(settings)
+    async def not_running(*_args):
+        return False
 
-    assert command[-4:] == ["--host", "127.0.0.2", "--port", "19999"]
+    monkeypatch.setattr("douyinks.downloader.check_daemon", not_running)
+    with pytest.raises(DaemonNotRunningError, match="另一个终端执行 douyinks"):
+        await service.ensure_daemon()
 
 
 @pytest.mark.asyncio
 async def test_wait_for_extension_connection_retries_until_connected(monkeypatch):
     settings = Settings.from_mapping(
         {
-            "MATRIX_HOMESERVER_URL": "https://matrix.example",
-            "MATRIX_USERNAME": "@bot:example",
-            "MATRIX_PASSWORD": "secret",
-            "MATRIX_ALLOWED_ROOM_IDS": "!allowed:example",
             "DOWNLOAD_ROOT": "/tmp/downloads",
         }
     )
@@ -60,10 +51,6 @@ async def test_wait_for_extension_connection_retries_until_connected(monkeypatch
 async def test_downloader_downloads_kuaishou_captured_likes(monkeypatch, tmp_path):
     settings = Settings.from_mapping(
         {
-            "MATRIX_HOMESERVER_URL": "https://matrix.example",
-            "MATRIX_USERNAME": "@bot:example",
-            "MATRIX_PASSWORD": "secret",
-            "MATRIX_ALLOWED_ROOM_IDS": "!allowed:example",
             "DOWNLOAD_ROOT": str(tmp_path),
         }
     )
@@ -81,6 +68,11 @@ async def test_downloader_downloads_kuaishou_captured_likes(monkeypatch, tmp_pat
         received["output_dir"] = output_dir
         return {"success": 1, "failed": 0, "skipped": 0, "items": [{"filename": "p1.mp4", "success": True}]}
 
+    async def noop():
+        return None
+
+    monkeypatch.setattr(service, "ensure_daemon", noop)
+    monkeypatch.setattr(service, "wait_for_extension_connection", noop)
     monkeypatch.setattr("douyinks.platforms.kuaishou.liked.read_captured", fake_read_captured)
     monkeypatch.setattr("douyinks.platforms.kuaishou.download.download_videos", fake_download_videos)
 
@@ -97,10 +89,6 @@ async def test_downloader_downloads_kuaishou_captured_likes(monkeypatch, tmp_pat
 async def test_downloader_downloads_douyin_like_range(monkeypatch, tmp_path):
     settings = Settings.from_mapping(
         {
-            "MATRIX_HOMESERVER_URL": "https://matrix.example",
-            "MATRIX_USERNAME": "@bot:example",
-            "MATRIX_PASSWORD": "secret",
-            "MATRIX_ALLOWED_ROOM_IDS": "!allowed:example",
             "DOWNLOAD_ROOT": str(tmp_path),
         }
     )
@@ -143,3 +131,50 @@ async def test_downloader_downloads_douyin_like_range(monkeypatch, tmp_path):
     assert received["max_count"] == 41
     assert result["requested"] == 41
     assert result["range"] == "60-100"
+
+
+@pytest.mark.asyncio
+async def test_douyin_detail_failures_are_included_in_download_result(monkeypatch, tmp_path):
+    service = DownloadService(Settings(str(tmp_path)))
+
+    async def noop():
+        pass
+
+    async def ids(page, limit):
+        return ["unavailable"]
+
+    async def detail(page, aweme_id):
+        raise RuntimeError("video unavailable")
+
+    async def download(videos, output_dir, **kwargs):
+        assert videos == []
+        return {"success": 0, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr(service, "ensure_daemon", noop)
+    monkeypatch.setattr(service, "wait_for_extension_connection", noop)
+    monkeypatch.setattr("douyinks.platforms.douyin.scrape_ids.run", ids)
+    monkeypatch.setattr("douyinks.platforms.douyin.detail.run", detail)
+    monkeypatch.setattr("douyinks.platforms.douyin.download.download_videos", download)
+
+    result = await service.run(DownloadCommand("douyin", "like", 1))
+
+    assert result["failed"] == 1
+    assert result["success"] == 0
+
+
+@pytest.mark.asyncio
+async def test_empty_douyin_list_does_not_report_success(monkeypatch, tmp_path):
+    service = DownloadService(Settings(str(tmp_path)))
+
+    async def noop():
+        pass
+
+    async def empty_ids(page, limit):
+        return []
+
+    monkeypatch.setattr(service, "ensure_daemon", noop)
+    monkeypatch.setattr(service, "wait_for_extension_connection", noop)
+    monkeypatch.setattr("douyinks.platforms.douyin.scrape_ids.run", empty_ids)
+
+    with pytest.raises(RuntimeError, match="未读取到"):
+        await service.run(DownloadCommand("douyin", "like", 1))

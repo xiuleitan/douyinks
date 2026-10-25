@@ -1,11 +1,13 @@
 import asyncio
 import re
 from pathlib import Path
+from typing import Callable
 
 import httpx
 
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+DownloadProgress = Callable[[int, int, dict], None]
 
 
 def sanitize_filename(name: str, max_len: int = 80) -> str:

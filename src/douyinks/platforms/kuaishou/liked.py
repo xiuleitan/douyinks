@@ -189,7 +189,7 @@ async def read_captured(page: BrowserPage, limit: int = 20) -> list[dict]:
     summary = await _wait_for_captured_responses(page, limit=limit)
     pending = summary["pending_response_count"]
     if pending:
-        raise KuaishouAPIError(f"快手 liked 仍有 {pending} 条响应未完成，请稍后再发送下载指令。")
+        raise KuaishouAPIError(f"快手 liked 仍有 {pending} 条响应未完成，请稍后重试 douyinks kuaishou download。")
     if summary["error_count"]:
         raise KuaishouAPIError(
             f"快手 liked 有 {summary['error_count']} 条响应读取失败；为避免漏下载，未开始下载，请重新开始捕获后再试。"
@@ -200,7 +200,7 @@ async def read_captured(page: BrowserPage, limit: int = 20) -> list[dict]:
         )
     videos = summary["videos"]
     if not videos:
-        raise KuaishouAPIError("尚未捕获到快手 liked 响应，请先发送 kuaishou capture start，然后在快手页面刷新/滚动。")
+        raise KuaishouAPIError("尚未捕获到快手 liked 响应，请先运行 douyinks kuaishou capture start，然后在快手页面刷新/滚动。")
     return videos
 
 

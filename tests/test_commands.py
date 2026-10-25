@@ -1,94 +1,33 @@
 import pytest
 
-from douyinks.commands import CaptureCommand, CommandParseError, DownloadCommand, parse_capture_command, parse_download_command
+from douyinks.commands import DownloadCommand
 
 
-def test_parse_download_command_accepts_douyin_like_count():
-    assert parse_download_command("download douyin like 20") == DownloadCommand(
-        platform="douyin",
-        source="like",
-        count=20,
-    )
+@pytest.mark.parametrize("platform,source", [("douyin", "like"), ("kuaishou", "like"), ("kuaishou", "captured")])
+def test_download_command_accepts_count(platform, source):
+    command = DownloadCommand(platform, source, 300)
+    assert command.count == 300
 
 
-def test_parse_download_command_accepts_kuaishou_like_count_case_insensitive():
-    assert parse_download_command("  DOWNLOAD KUAISHOU LIKE 7  ") == DownloadCommand(
-        platform="kuaishou",
-        source="like",
-        count=7,
-    )
+@pytest.mark.parametrize("count", [0, -1, 501])
+def test_download_command_rejects_invalid_count(count):
+    with pytest.raises(ValueError, match="下载数量"):
+        DownloadCommand("douyin", "like", count)
 
 
-def test_parse_download_command_accepts_kuaishou_captured_count():
-    assert parse_download_command("download kuaishou captured 12") == DownloadCommand(
-        platform="kuaishou",
-        source="captured",
-        count=12,
-    )
+def test_download_command_preserves_douyin_range():
+    assert DownloadCommand("douyin", "like", 41, 60, 100).range_end == 100
 
 
-def test_parse_download_command_accepts_count_up_to_500():
-    assert parse_download_command("download douyin like 500") == DownloadCommand(
-        platform="douyin",
-        source="like",
-        count=500,
-    )
-
-
-def test_parse_download_command_accepts_douyin_like_range():
-    assert parse_download_command("download douyin like 60-100") == DownloadCommand(
-        platform="douyin",
-        source="like",
-        count=41,
-        range_start=60,
-        range_end=100,
-    )
-
-
-def test_parse_download_command_rejects_count_over_500():
-    with pytest.raises(CommandParseError, match="count 最大为 500"):
-        parse_download_command("download douyin like 501")
-
-
-@pytest.mark.parametrize("message", ["download douyin like 0-10", "download douyin like 100-60", "download kuaishou like 1-10"])
-def test_parse_download_command_rejects_unsupported_ranges(message):
-    with pytest.raises(CommandParseError):
-        parse_download_command(message)
-
-
-def test_parse_capture_command_accepts_kuaishou_capture_start():
-    assert parse_capture_command("  KUAISHOU CAPTURE START  ") == CaptureCommand(
-        platform="kuaishou",
-        target="liked",
-        action="start",
-    )
-
-
-def test_parse_capture_command_accepts_captured_num():
-    assert parse_capture_command("  CAPTURED NUM  ") == CaptureCommand(
-        platform="kuaishou",
-        target="liked",
-        action="num",
-    )
-
-
-@pytest.mark.parametrize(
-    "message",
-    [
-        "download twitter like 20",
-        "download douyin bookmarks 20",
-        "download douyin captured 20",
-        "download douyin like 0",
-        "download douyin like abc",
-        "hello",
-    ],
-)
-def test_parse_download_command_rejects_unsupported_messages(message):
-    with pytest.raises(CommandParseError):
-        parse_download_command(message)
-
-
-@pytest.mark.parametrize("message", ["kuaishou capture stop", "douyin capture start", "captured count", "hello"])
-def test_parse_capture_command_rejects_unsupported_messages(message):
-    with pytest.raises(CommandParseError):
-        parse_capture_command(message)
+@pytest.mark.parametrize("platform,source,start,end", [
+    ("other", "like", None, None),
+    ("douyin", "captured", None, None),
+    ("kuaishou", "unknown", None, None),
+    ("kuaishou", "captured", 1, 2),
+    ("douyin", "like", None, 2),
+    ("douyin", "like", 0, 1),
+    ("douyin", "like", 1, 3),
+])
+def test_download_command_rejects_unsupported_requests(platform, source, start, end):
+    with pytest.raises(ValueError):
+        DownloadCommand(platform, source, 2, start, end)
