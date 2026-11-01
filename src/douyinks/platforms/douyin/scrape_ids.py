@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from ...browser import BrowserPage
 
 
@@ -45,7 +47,15 @@ def _stagnant_limit(limit: int) -> int:
     return max(3, min(12, limit // 50 + 3))
 
 
-async def run(page: BrowserPage, limit: int, scroll_delay: float = 2.0) -> list[str]:
+async def run(
+    page: BrowserPage,
+    limit: int,
+    scroll_delay: float = 2.0,
+    *,
+    progress: Callable[[int, int], None] | None = None,
+) -> list[str]:
+    if progress:
+        progress(0, limit)
     await page.goto("https://www.douyin.com/user/self?from_tab_name=main&showTab=like")
     await page.wait(3)
 
@@ -71,6 +81,8 @@ async def run(page: BrowserPage, limit: int, scroll_delay: float = 2.0) -> list[
         else:
             stagnant_rounds = 0
             previous_count = len(all_ids)
+            if progress:
+                progress(len(all_ids), limit)
 
         if len(all_ids) < limit:
             await page.evaluate(SCROLL_JS)

@@ -1,10 +1,12 @@
 import asyncio
 import json
+from io import StringIO
 
 import pytest
 from aiohttp import ClientSession, web
 from aiohttp.test_utils import TestServer
 from click.testing import CliRunner
+from rich.console import Console
 
 import douyinks.main as main
 from douyinks.commands import DownloadCommand
@@ -112,6 +114,55 @@ def test_partial_download_failure_returns_nonzero_exit(monkeypatch, tmp_path):
     assert "成功 1" in result.output
     assert "失败 1" in result.output
     assert "完成时间" in result.output
+
+
+def test_douyin_cli_reports_detail_progress_before_downloading_files(monkeypatch, tmp_path):
+    settings = Settings(str(tmp_path), download_delay_seconds=0)
+    output = StringIO()
+    monkeypatch.setattr(main, "console", Console(file=output, width=120))
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls: settings))
+
+    async def noop(self):
+        pass
+
+    class Page:
+        async def goto(self, url):
+            assert "读取点赞列表 0/2" in output.getvalue()
+
+        async def wait(self, seconds):
+            pass
+
+        async def evaluate(self, js):
+            return ["unavailable", "available"]
+
+    async def detail(page, aweme_id):
+        index = 1 if aweme_id == "unavailable" else 2
+        # The status must reach the terminal before the browser request finishes.
+        assert "读取点赞列表 2/2" in output.getvalue()
+        assert f"读取详情 {index}/2" in output.getvalue()
+        if aweme_id == "unavailable":
+            raise RuntimeError("video unavailable")
+        return [{"aweme_id": aweme_id, "play_url": "https://example.test/video.mp4"}]
+
+    async def download(url, path, referer):
+        assert "详情读取完成 2/2 | 失败 1" in output.getvalue()
+        assert "下载进度 0/1" in output.getvalue()
+        path.write_bytes(b"video")
+        return True
+
+    monkeypatch.setattr(DownloadService, "ensure_daemon", noop)
+    monkeypatch.setattr(DownloadService, "wait_for_extension_connection", noop)
+    monkeypatch.setattr("douyinks.downloader.BrowserPage", lambda **kwargs: Page())
+    monkeypatch.setattr("douyinks.platforms.douyin.detail.run", detail)
+    monkeypatch.setattr("douyinks.platforms.douyin.download.download_single", download)
+
+    result = CliRunner().invoke(main.cli, ["douyin", "download", "2"])
+
+    assert result.exit_code == 1, result.output
+    assert "下载进度 1/1 | 成功 1 | 失败 0 | 跳过 0" in output.getvalue()
+    assert "下载完成: 请求 2，成功 1，失败 1，跳过 0。" in output.getvalue()
+    report = json.loads((tmp_path / "douyin_last_download.json").read_text())
+    assert (report["success"], report["failed"]) == (1, 1)
 
 
 @pytest.mark.parametrize("platform", ["douyin", "kuaishou"])

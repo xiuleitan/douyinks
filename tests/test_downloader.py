@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from douyinks.config import Settings
@@ -98,7 +100,7 @@ async def test_downloader_downloads_douyin_like_range(monkeypatch, tmp_path):
     async def noop():
         return None
 
-    async def fake_scrape_ids(page, limit):
+    async def fake_scrape_ids(page, limit, *, progress=None):
         received["scrape_limit"] = limit
         return [f"id-{index}" for index in range(1, limit + 1)]
 
@@ -140,7 +142,7 @@ async def test_douyin_detail_failures_are_included_in_download_result(monkeypatc
     async def noop():
         pass
 
-    async def ids(page, limit):
+    async def ids(page, limit, *, progress=None):
         return ["unavailable"]
 
     async def detail(page, aweme_id):
@@ -169,7 +171,7 @@ async def test_empty_douyin_list_does_not_report_success(monkeypatch, tmp_path):
     async def noop():
         pass
 
-    async def empty_ids(page, limit):
+    async def empty_ids(page, limit, *, progress=None):
         return []
 
     monkeypatch.setattr(service, "ensure_daemon", noop)
@@ -178,3 +180,62 @@ async def test_empty_douyin_list_does_not_report_success(monkeypatch, tmp_path):
 
     with pytest.raises(RuntimeError, match="未读取到"):
         await service.run(DownloadCommand("douyin", "like", 1))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
+async def test_waiting_status_is_live_and_stops_when_download_ends(monkeypatch, tmp_path, outcome):
+    statuses = []
+    waiting_reported = asyncio.Event()
+    release_browser = asyncio.Event()
+
+    def status(message):
+        statuses.append(message)
+        if "点赞列表" in message and "已等待" in message:
+            waiting_reported.set()
+
+    service = DownloadService(Settings(str(tmp_path)), status_callback=status)
+
+    async def noop():
+        pass
+
+    async def ids(page, limit, *, progress=None):
+        await release_browser.wait()
+        if outcome == "failed":
+            raise RuntimeError("browser failed")
+        return ["only"]
+
+    async def detail(page, aweme_id):
+        return [{"aweme_id": aweme_id}]
+
+    monkeypatch.setattr("douyinks.downloader.WAIT_STATUS_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(service, "ensure_daemon", noop)
+    monkeypatch.setattr(service, "wait_for_extension_connection", noop)
+    monkeypatch.setattr("douyinks.platforms.douyin.scrape_ids.run", ids)
+    monkeypatch.setattr("douyinks.platforms.douyin.detail.run", detail)
+
+    task = asyncio.create_task(service.run(DownloadCommand("douyin", "like", 1)))
+    try:
+        await asyncio.wait_for(waiting_reported.wait(), timeout=1)
+        assert not task.done()
+        assert not any("读取详情 1/1" in message for message in statuses)
+
+        if outcome == "cancelled":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            release_browser.set()
+            if outcome == "failed":
+                with pytest.raises(RuntimeError, match="browser failed"):
+                    await task
+            else:
+                result = await task
+                assert result["skipped"] == 1
+
+        count = len(statuses)
+        await asyncio.sleep(0.03)
+        assert len(statuses) == count
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

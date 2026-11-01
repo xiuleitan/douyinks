@@ -117,13 +117,25 @@ Direct API collection remains available:
 douyinks kuaishou download 300 --source like
 ```
 
-Each count-based task accepts **1–500** entries. `300` selects up to 300 liked entries for processing. Existing downloads are skipped; short lists, unavailable content, or failures may result in fewer new files. Douyin image or mixed posts can produce multiple media files. Run platform download commands sequentially.
+Each count-based task accepts **1–500** entries. `300` selects up to 300 liked entries for processing. Existing downloads are skipped; short lists, unavailable content, or failures may result in fewer new files. Douyin image or mixed posts can produce multiple media files.
+
+Douyin and Kuaishou can download concurrently in separate terminals using one daemon:
+
+| Terminal | Action |
+| --- | --- |
+| Daemon | Run `douyinks` and keep it open; start only one daemon |
+| Douyin | Run `douyinks douyin download 500` |
+| Kuaishou | Start capture and load the liked list first, then run `douyinks kuaishou download 500` |
+
+Each platform uses its own browser page, output directory, progress, and summary. Shared download-history writes are locked and merged. Run only one download task per platform at a time. Both download processes must use the updated code for this concurrency fix; finish or restart tasks launched before the update before downloading concurrently. The daemon does not need restarting.
 
 ## Progress and summaries
 
 Progress and the final summary appear in the **terminal running the download command**. The first terminal running `douyinks` hosts the browser bridge. An HTTP 200 bridge log does not mean a video has finished downloading.
 
-Downloads show the processed count and success, failure, and skip counts. The final summary includes the requested and available counts, results, elapsed time, and output directory. HTTP request logs are hidden by default; use `--log-level DEBUG` when troubleshooting.
+Startup reports daemon and extension connections. While scrolling the liked list, Douyin shows `读取点赞列表 0/500`, `读取点赞列表 36/500`, and so on, counting unique entries collected so far. It then reads each entry's details, showing `读取详情 1/500`, `读取详情 2/500`, and so on. Files have not started downloading during either reading stage. File downloads then show the processed count, such as `下载进度 1/500`, along with success, failure, and skip counts. The denominator is the number of entries that reach the file-download stage. If a step has no new progress for over 10 seconds, the terminal continues reporting the current step and time spent waiting.
+
+The final summary includes the requested and available counts, results, elapsed time, and output directory. HTTP request logs are hidden by default; use `--log-level DEBUG` when troubleshooting.
 
 Each completed count-based task saves its latest result, including tasks with failed videos. Read it later with:
 

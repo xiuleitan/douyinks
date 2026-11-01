@@ -1,6 +1,8 @@
+import fcntl
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 
@@ -8,6 +10,7 @@ class DownloadHistory:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self._data = self._load()
+        self._pending: dict[str, dict[str, Any]] = {}
 
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -43,7 +46,8 @@ class DownloadHistory:
         if not video_id:
             return
         path = Path(file_path)
-        self._data["downloads"][self.make_key(platform, video_id)] = {
+        key = self.make_key(platform, video_id)
+        item = {
             "platform": platform,
             "video_id": video_id,
             "status": "success",
@@ -51,13 +55,30 @@ class DownloadHistory:
             "file_path": str(path),
             "downloaded_at": datetime.now(timezone.utc).isoformat(),
         }
+        self._data["downloads"][key] = item
+        self._pending[key] = item
         self.save()
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp_path.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-        tmp_path.replace(self.path)
+        # Keep the lock on a separate file: replacing the JSON changes its inode.
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        with lock_path.open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            latest = self._load()
+            # Merge only this process's new records, preserving other writers' updates.
+            latest["downloads"].update(self._pending)
+            tmp_path = None
+            try:
+                with NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=self.path.parent,
+                    prefix=f".{self.path.name}.", suffix=".tmp", delete=False,
+                ) as temporary:
+                    tmp_path = Path(temporary.name)
+                    json.dump(latest, temporary, ensure_ascii=False, indent=2, sort_keys=True)
+                tmp_path.replace(self.path)
+            finally:
+                if tmp_path is not None:
+                    tmp_path.unlink(missing_ok=True)
+            self._data = latest
+            self._pending.clear()

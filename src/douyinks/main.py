@@ -183,6 +183,10 @@ def print_download_progress(completed, total, counters):
     )
 
 
+def print_download_status(message):
+    console.print(message, markup=False)
+
+
 def show_saved_summary(platform):
     try:
         summary = load_summary(load_settings(), platform)
@@ -205,7 +209,9 @@ def run_download(platform, source, count, log_level, *, start=1):
     console.print(f"开始下载 {platform} 点赞内容，数量: {count}。")
     console.print("进度和最终汇总会显示在本终端；后台窗口用于保持浏览器桥接连接。")
     started = time.monotonic()
-    result = run_async(DownloadService(settings, progress=print_download_progress).run(command))
+    result = run_async(DownloadService(
+        settings, progress=print_download_progress, status_callback=print_download_status,
+    ).run(command))
     result = {**result, "platform": platform, "source": source, "elapsed_seconds": time.monotonic() - started}
     try:
         result = save_summary(settings, platform, result, result["elapsed_seconds"])

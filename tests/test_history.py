@@ -36,3 +36,35 @@ def test_download_history_ignores_missing_files(tmp_path):
 
     loaded = DownloadHistory(history_path)
     assert not loaded.is_successfully_downloaded("kuaishou", "abc")
+
+
+def test_separate_downloaders_preserve_each_others_history(tmp_path):
+    history_path = tmp_path / "download_history.json"
+    douyin = DownloadHistory(history_path)
+    kuaishou = DownloadHistory(history_path)
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+
+    douyin.record_success("douyin", "first", video, video.name)
+    kuaishou.record_success("kuaishou", "first", video, video.name)
+    douyin.record_success("douyin", "second", video, video.name)
+
+    loaded = DownloadHistory(history_path)
+    assert loaded.is_successfully_downloaded("douyin", "first")
+    assert loaded.is_successfully_downloaded("kuaishou", "first")
+    assert loaded.is_successfully_downloaded("douyin", "second")
+
+
+def test_stale_downloader_does_not_restore_another_platforms_old_record(tmp_path):
+    history_path = tmp_path / "download_history.json"
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    kuaishou = DownloadHistory(history_path)
+    kuaishou.record_success("kuaishou", "first", video, "old.mp4")
+    douyin = DownloadHistory(history_path)
+
+    kuaishou.record_success("kuaishou", "first", video, "updated.mp4")
+    douyin.record_success("douyin", "first", video, video.name)
+
+    loaded = DownloadHistory(history_path)
+    assert loaded.get("kuaishou", "first")["filename"] == "updated.mp4"
