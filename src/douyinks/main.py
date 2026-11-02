@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import click
 import httpx
@@ -23,6 +25,8 @@ HELP_EXAMPLES = """\b
   douyinks kuaishou count                查询已捕获的视频数量
   douyinks kuaishou download 300         下载快手监听结果
   douyinks kuaishou summary              查看最近一次快手下载汇总
+  douyinks sync-status                   查看手机同步地址和同步记录
+  douyinks sync-server                   单独启动手机文件同步服务
 
 \b
 快手先启动监听，再在网页刷新、进入点赞页并滚动加载，然后查询数量、下载。
@@ -81,14 +85,29 @@ def load_settings() -> Settings:
         raise click.ClickException(str(exc)) from exc
 
 
-def start_daemon(host=None, port=None, log_level="INFO"):
+def start_daemon(host=None, port=None, log_level="INFO", *, with_sync=True):
     from .daemon import main as daemon_main
 
     configure_logging(log_level)
     settings = load_settings()
     console.print("本地后台启动中。请保持此终端运行，在另一个终端执行下载命令；Ctrl+C 停止。")
     console.print("运行 douyinks help 查看全部命令和常用示例。")
-    daemon_main(host=host or settings.daemon_host, port=port or settings.daemon_port)
+    kwargs = {"host": host or settings.daemon_host, "port": port or settings.daemon_port}
+    if with_sync and settings.sync_server_enabled:
+        from .sync_server import validate_sync_settings
+
+        try:
+            validate_sync_settings(settings)
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if settings.sync_server_port == kwargs["port"]:
+            raise click.ClickException("手机同步端口不能与浏览器桥接端口相同，请修改 SYNC_SERVER_PORT。")
+        kwargs["sync_settings"] = settings
+        console.print(f"手机文件同步也将启动，端口 {settings.sync_server_port}；运行 douyinks sync-status 查看手机连接地址。")
+    try:
+        daemon_main(**kwargs)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @click.group(name="douyinks", cls=LocalCommandGroup, invoke_without_command=True, epilog=HELP_EXAMPLES)
@@ -124,8 +143,65 @@ def show_help(ctx, command_path):
 @click.option("--port", default=None, type=click.IntRange(1, 65535), help="覆盖 DOUYINKS_DAEMON_PORT。")
 @click.option("--log-level", default="INFO", show_default=True, help="日志级别，例如 DEBUG、INFO、WARNING。")
 def daemon(host, port, log_level):
-    """启动本地后台（与直接运行 douyinks 相同）。"""
-    start_daemon(host=host, port=port, log_level=log_level)
+    """仅启动本地浏览器桥接后台。"""
+    start_daemon(host=host, port=port, log_level=log_level, with_sync=False)
+
+
+@cli.command("sync-server")
+@click.option("--host", default=None, help="覆盖 SYNC_SERVER_HOST；手机连接需使用 0.0.0.0 或局域网地址。")
+@click.option("--port", default=None, type=click.IntRange(1, 65535), help="覆盖 SYNC_SERVER_PORT。")
+@click.option("--log-level", default="INFO", show_default=True)
+def sync_server(host, port, log_level):
+    """启动手机文件同步服务，沿用原有下载与同步历史。"""
+    from .sync_server import start_sync_server
+
+    configure_logging(log_level)
+    settings = load_settings()
+    if host is not None or port is not None:
+        settings = replace(settings, sync_server_host=host if host is not None else settings.sync_server_host,
+                           sync_server_port=port if port is not None else settings.sync_server_port)
+    console.print(f"手机同步服务启动中: {settings.sync_server_host}:{settings.sync_server_port}；Ctrl+C 停止。")
+    run_async(start_sync_server(settings))
+
+
+@cli.command("sync-status")
+def sync_status():
+    """查看手机同步地址、服务状态和已保存的同步记录数量。"""
+    from .network import get_lan_ips
+
+    settings = load_settings()
+    addresses = get_lan_ips() if settings.sync_server_host == "0.0.0.0" else [settings.sync_server_host]
+    for address in addresses:
+        console.print(f"手机同步地址: http://{address}:{settings.sync_server_port}")
+    if not addresses:
+        console.print(f"同步端口: {settings.sync_server_port}，当前未找到局域网 IP。")
+    path = Path(settings.sync_state_path)
+    console.print(f"同步记录: {path}")
+    if path.is_file():
+        try:
+            from .sync_transfer import SyncTransferState
+
+            state = SyncTransferState(path)
+            console.print(f"历史已同步记录: {state.synced_count}")
+        except (OSError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+    else:
+        console.print("尚无同步记录；首次启动会创建基线。")
+    console.print("同步 Token: " + ("已配置" if settings.sync_token else "未配置，请填写 .env 中的 SYNC_TOKEN"))
+
+    async def check_sync():
+        host = "127.0.0.1" if settings.sync_server_host == "0.0.0.0" else settings.sync_server_host
+        try:
+            async with httpx.AsyncClient(trust_env=False) as client:
+                response = await client.get(f"http://{host}:{settings.sync_server_port}/sync/health", timeout=3)
+                return response.status_code == 200 and response.json().get("service") == "douyinks-sync"
+        except (httpx.HTTPError, ValueError):
+            return False
+
+    if run_async(check_sync()):
+        console.print("[green]手机同步服务运行中[/green]")
+    else:
+        raise click.ClickException("手机同步服务未运行。启用配置后重启 douyinks，或单独运行 douyinks sync-server。")
 
 
 @cli.command()

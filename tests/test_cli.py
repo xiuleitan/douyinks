@@ -40,6 +40,64 @@ def test_daemon_subcommand_honors_address_override(monkeypatch):
     assert started == [{"host": "127.0.0.2", "port": 19998}]
 
 
+def test_bare_command_also_starts_phone_sync_when_enabled(monkeypatch, tmp_path):
+    settings = Settings(str(tmp_path), sync_server_enabled=True, sync_token="phone-token")
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls: settings))
+    started = []
+    monkeypatch.setattr("douyinks.daemon.main", lambda **kwargs: started.append(kwargs))
+
+    result = CliRunner().invoke(main.cli, [])
+
+    assert result.exit_code == 0, result.output
+    assert started == [{"host": "127.0.0.1", "port": 19826, "sync_settings": settings}]
+    assert "手机文件同步也将启动" in result.output
+    assert "phone-token" not in result.output
+
+
+def test_daemon_subcommand_can_still_start_bridge_alone(monkeypatch, tmp_path):
+    settings = Settings(str(tmp_path), sync_server_enabled=True, sync_token="phone-token")
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls: settings))
+    started = []
+    monkeypatch.setattr("douyinks.daemon.main", lambda **kwargs: started.append(kwargs))
+
+    result = CliRunner().invoke(main.cli, ["daemon"])
+
+    assert result.exit_code == 0, result.output
+    assert started == [{"host": "127.0.0.1", "port": 19826}]
+
+
+def test_sync_server_command_preserves_host_and_port_overrides(monkeypatch, tmp_path):
+    settings = Settings(str(tmp_path), sync_token="phone-token")
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls: settings))
+    started = []
+
+    async def start(settings):
+        started.append(settings)
+
+    monkeypatch.setattr("douyinks.sync_server.start_sync_server", start)
+    result = CliRunner().invoke(main.cli, ["sync-server", "--host", "0.0.0.0", "--port", "19998"])
+
+    assert result.exit_code == 0, result.output
+    assert len(started) == 1
+    assert started[0].sync_server_host == "0.0.0.0"
+    assert started[0].sync_server_port == 19998
+    assert started[0].download_root == str(tmp_path)
+
+
+def test_enabling_phone_sync_requires_token_before_startup(monkeypatch, tmp_path):
+    settings = Settings(str(tmp_path), sync_server_enabled=True)
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls: settings))
+    started = []
+    monkeypatch.setattr("douyinks.daemon.main", lambda **kwargs: started.append(kwargs))
+
+    result = CliRunner().invoke(main.cli, [])
+
+    assert result.exit_code == 1
+    assert "SYNC_TOKEN" in result.output
+    assert started == []
+    assert not (tmp_path / "sync_state.json").exists()
+
+
 @pytest.mark.parametrize("command,args,expected", [
     (main.cli, ["douyin", "download", "300"], DownloadCommand("douyin", "like", 300)),
     (main.cli, ["douyin", "download", "41", "--start", "60"], DownloadCommand("douyin", "like", 41, 60, 100)),
@@ -233,7 +291,7 @@ def test_help_command_reports_unknown_command_paths(path):
     assert "douyinks help" in result.output
 
 
-@pytest.mark.parametrize("command", ["bot", "sync-server", "serve"])
+@pytest.mark.parametrize("command", ["bot", "serve"])
 def test_removed_service_commands_are_unavailable(command):
     result = CliRunner().invoke(main.cli, [command])
     assert result.exit_code == 2

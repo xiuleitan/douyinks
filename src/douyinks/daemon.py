@@ -5,7 +5,7 @@ from typing import Any
 
 from aiohttp import WSMsgType, web
 
-from .config import CUSTOM_HEADER, DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
+from .config import CUSTOM_HEADER, DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT, Settings
 
 logger = logging.getLogger("douyinks.daemon")
 extension_ws: web.WebSocketResponse | None = None
@@ -142,20 +142,28 @@ async def close_extension_connection(app: web.Application) -> None:
         await extension_ws.close(code=1001, message=b"Douyinks stopped")
 
 
-def create_app() -> web.Application:
+def create_app(*, sync_settings: Settings | None = None) -> web.Application:
     app = web.Application(client_max_size=MAX_BODY)
     app.router.add_get("/ping", handle_ping)
     app.router.add_get("/status", handle_status)
     app.router.add_post("/command", handle_command)
     app.router.add_get("/ext", handle_ext_ws)
     app.on_shutdown.append(close_extension_connection)
+    if sync_settings is not None:
+        async def phone_sync_context(app):
+            from .sync_server import running_sync_server
+
+            async with running_sync_server(sync_settings):
+                yield
+
+        app.cleanup_ctx.append(phone_sync_context)
     return app
 
 
-def main(host: str = DEFAULT_DAEMON_HOST, port: int = DEFAULT_DAEMON_PORT) -> None:
+def main(host: str = DEFAULT_DAEMON_HOST, port: int = DEFAULT_DAEMON_PORT, *, sync_settings: Settings | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="[douyinks-daemon] %(message)s")
     logger.info(f"Listening on http://{host}:{port}")
-    web.run_app(create_app(), host=host, port=port, print=None)
+    web.run_app(create_app(sync_settings=sync_settings), host=host, port=port, print=None)
 
 
 if __name__ == "__main__":

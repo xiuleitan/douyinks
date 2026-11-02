@@ -7,7 +7,7 @@
 ![uv](https://img.shields.io/badge/uv-managed-green)
 ![Chrome Extension](https://img.shields.io/badge/Chrome-extension-green)
 
-Download liked Douyin and Kuaishou content from a local Mac terminal. Run `douyinks` in one terminal to start the browser bridge, then run download commands in another. Files are saved directly to the Mac.
+Download liked Douyin and Kuaishou content from a local Mac terminal. Run `douyinks` in one terminal to start the browser bridge, then run download commands in another. Files are saved directly to the Mac and can also be synchronized to a phone over the LAN.
 
 ## Why this project exists
 
@@ -146,6 +146,29 @@ douyinks douyin summary
 
 Results are stored in `DOWNLOAD_ROOT/kuaishou_last_download.json` and `DOWNLOAD_ROOT/douyin_last_download.json`. The summary describes the latest completed task and includes its completion time. Watch the download terminal for an ongoing task's progress. Tasks already running before an update retain their original behavior; progress and saved summaries apply to newly started tasks.
 
+## Phone file synchronization
+
+The phone app can pull downloaded files from the Mac using its original HTTP API. Download commands run in the Mac terminal; file synchronization uses a separate LAN service.
+
+Configure the project `.env`:
+
+```env
+SYNC_SERVER_ENABLED=true
+SYNC_SERVER_HOST=0.0.0.0
+SYNC_SERVER_PORT=19827
+SYNC_TOKEN=the-same-token-as-the-phone
+```
+
+Restart `douyinks` in the background terminal to run both the browser bridge and phone sync server. Inspect the phone connection address and saved acknowledgment count:
+
+```bash
+douyinks sync-status
+```
+
+Connect both devices to the same LAN. Enter the displayed `http://LAN-IP:19827` URL and matching token in the phone app. Run `douyinks sync-server` for standalone sync operation; `douyinks daemon` starts only the browser bridge.
+
+Recovery reuses `DOWNLOAD_ROOT/download_history.json` and `DOWNLOAD_ROOT/sync_state.json`, preserving the original baseline and phone acknowledgments. Files downloaded while the service was unavailable remain eligible under that original baseline when their files still exist. The API and response fields remain compatible; see the [Mobile Sync API](docs/mobile-sync-api.md).
+
 ## Configuration
 
 Editable installs read `.env` from the project root regardless of the terminal's working directory. Configuration is optional. Existing download paths remain in use. For a new environment:
@@ -162,8 +185,12 @@ Edit an existing `.env` directly to preserve its download directory. Non-editabl
 | `DOUYINKS_DAEMON_HOST` | `127.0.0.1` | Local bridge host. |
 | `DOUYINKS_DAEMON_PORT` | `19826` | Local bridge port, also used by the extension by default. |
 | `DOWNLOAD_DELAY_SECONDS` | `3` | Delay between media items in count-based downloads. |
+| `SYNC_SERVER_ENABLED` | `false` | Start phone sync automatically with `douyinks`. |
+| `SYNC_SERVER_HOST` | `127.0.0.1` | Set to `0.0.0.0` or the Mac's LAN address for phone access. |
+| `SYNC_SERVER_PORT` | `19827` | Phone file sync port. |
+| `SYNC_TOKEN` | empty | Access token matching the phone; required before starting sync. |
 
-The extension connects to `localhost:19826`. Keep the default address and port for normal use. A custom port also requires updating `extension/background.js` and reloading the extension. You can explicitly start the service with `douyinks daemon --host 127.0.0.1 --port 19826`.
+The extension connects to `localhost:19826`. Keep the default address and port for normal use. A custom port also requires updating `extension/background.js` and reloading the extension. Start only the browser bridge with `douyinks daemon --host 127.0.0.1 --port 19826`.
 
 Output paths:
 

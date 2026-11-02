@@ -7,7 +7,7 @@
 ![uv](https://img.shields.io/badge/uv-managed-green)
 ![Chrome Extension](https://img.shields.io/badge/Chrome-extension-green)
 
-在 Mac 本机通过命令行下载抖音和快手的点赞内容。第一个终端运行 `douyinks` 启动本地浏览器桥接后台，第二个终端执行下载命令。下载文件直接保存在 Mac。
+在 Mac 本机通过命令行下载抖音和快手的点赞内容。第一个终端运行 `douyinks` 启动本地浏览器桥接后台，第二个终端执行下载命令。下载文件直接保存在 Mac，也可通过局域网同步到手机。
 
 ## 为什么做这个项目
 
@@ -146,6 +146,29 @@ douyinks douyin summary
 
 汇总文件分别为 `DOWNLOAD_ROOT/kuaishou_last_download.json` 和 `DOWNLOAD_ROOT/douyin_last_download.json`。`summary` 显示最近一次已完成任务的统计和完成时间；进行中的任务请查看下载终端进度。升级前已启动的任务继续使用原有逻辑，新的进度显示和汇总保存从下次启动任务起生效。
 
+## 手机文件同步
+
+手机端仍可从 Mac 拉取下载好的文件。下载指令在 Mac 终端执行，文件同步使用独立的局域网 HTTP 服务，沿用原手机 App 的接口。
+
+在项目 `.env` 配置：
+
+```env
+SYNC_SERVER_ENABLED=true
+SYNC_SERVER_HOST=0.0.0.0
+SYNC_SERVER_PORT=19827
+SYNC_TOKEN=与手机端填写的Token一致
+```
+
+重启第一个终端中的 `douyinks` 后，会同时运行浏览器桥接和手机同步服务。查看手机应填写的连接地址与历史同步记录数量：
+
+```bash
+douyinks sync-status
+```
+
+Mac 和手机连接同一局域网，手机端填写输出的 `http://局域网IP:19827` 地址，并使用相同的 Token。单独运行手机同步服务时，可执行 `douyinks sync-server`；`douyinks daemon` 仅启动浏览器桥接。
+
+恢复前后的下载记录仍使用 `DOWNLOAD_ROOT/download_history.json`，手机接收确认仍使用 `DOWNLOAD_ROOT/sync_state.json`。已有同步基线和确认记录会继续沿用；服务停用期间新增且仍存在的文件会按原基线进入待同步列表。API 与字段保持兼容，详见 [手机同步 API](docs/mobile-sync-api.md)。
+
 ## 配置
 
 开发目录安装默认读取项目根目录的 `.env`，不受终端当前目录影响。配置文件可选；已有 `.env` 中的下载目录继续生效。新环境可以复制 `.env.example` 后修改：
@@ -162,8 +185,12 @@ cp .env.example .env
 | `DOUYINKS_DAEMON_HOST` | `127.0.0.1` | 本地桥接地址。 |
 | `DOUYINKS_DAEMON_PORT` | `19826` | 本地桥接端口。Chrome 扩展默认使用此端口。 |
 | `DOWNLOAD_DELAY_SECONDS` | `3` | 按数量下载时，媒体项之间的等待秒数。 |
+| `SYNC_SERVER_ENABLED` | `false` | 是否随 `douyinks` 自动启动手机文件同步。 |
+| `SYNC_SERVER_HOST` | `127.0.0.1` | 手机连接时配置为 `0.0.0.0` 或 Mac 的局域网地址。 |
+| `SYNC_SERVER_PORT` | `19827` | 手机文件同步端口。 |
+| `SYNC_TOKEN` | 空 | 与手机端一致的访问 Token，启动同步前必填。 |
 
-扩展固定连接 `localhost:19826`；通常保持默认地址和端口即可。如果调试时修改端口，需要同时修改 `extension/background.js` 中的端口并重新加载扩展。也可运行 `douyinks daemon --host 127.0.0.1 --port 19826` 显式启动后台。
+扩展固定连接 `localhost:19826`；通常保持默认地址和端口即可。如果调试时修改端口，需要同时修改 `extension/background.js` 中的端口并重新加载扩展。也可运行 `douyinks daemon --host 127.0.0.1 --port 19826` 单独启动浏览器桥接。
 
 输出目录：
 

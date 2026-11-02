@@ -30,6 +30,26 @@ def test_settings_parse_local_options(tmp_path):
     assert settings.download_delay_seconds == 0.5
 
 
+def test_phone_sync_config_is_independent_of_command_transport(tmp_path):
+    settings = Settings.from_mapping({
+        "DOWNLOAD_ROOT": str(tmp_path),
+        "SYNC_SERVER_ENABLED": "true", "SYNC_SERVER_HOST": "0.0.0.0",
+        "SYNC_SERVER_PORT": "19998", "SYNC_TOKEN": "phone-token",
+    })
+    assert settings.sync_server_enabled is True
+    assert settings.sync_server_host == "0.0.0.0"
+    assert settings.sync_server_port == 19998
+    assert settings.sync_token == "phone-token"
+    assert settings.sync_state_path == str(tmp_path / "sync_state.json")
+
+
+@pytest.mark.parametrize("key,value", [("SYNC_SERVER_PORT", "0"), ("SYNC_SERVER_PORT", "bad"),
+                                        ("SYNC_SERVER_PORT", "65536"), ("SYNC_SERVER_ENABLED", "maybe")])
+def test_phone_sync_rejects_invalid_options(key, value):
+    with pytest.raises(ValueError, match=key):
+        Settings.from_mapping({key: value})
+
+
 @pytest.mark.parametrize("key,value", [
     ("DOUYINKS_DAEMON_PORT", "0"),
     ("DOUYINKS_DAEMON_PORT", "65536"),

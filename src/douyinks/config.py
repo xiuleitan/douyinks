@@ -13,6 +13,10 @@ class Settings:
     daemon_host: str = "127.0.0.1"
     daemon_port: int = 19826
     download_delay_seconds: float = 3.0
+    sync_server_enabled: bool = False
+    sync_server_host: str = "127.0.0.1"
+    sync_server_port: int = 19827
+    sync_token: str = ""
 
     @classmethod
     def load(cls, env_file: str | Path | None = None) -> "Settings":
@@ -42,11 +46,24 @@ class Settings:
             raise ValueError("DOWNLOAD_DELAY_SECONDS 必须是非负数字") from exc
         if not math.isfinite(delay) or delay < 0:
             raise ValueError("DOWNLOAD_DELAY_SECONDS 必须是非负数字")
+        try:
+            sync_port = int(values.get("SYNC_SERVER_PORT", "19827"))
+        except ValueError as exc:
+            raise ValueError("SYNC_SERVER_PORT 必须是 1–65535 的整数") from exc
+        if not 1 <= sync_port <= 65535:
+            raise ValueError("SYNC_SERVER_PORT 必须是 1–65535 的整数")
+        enabled = values.get("SYNC_SERVER_ENABLED", "false").strip().lower()
+        if enabled not in {"true", "false", "1", "0", "yes", "no", "on", "off", ""}:
+            raise ValueError("SYNC_SERVER_ENABLED 必须是 true 或 false")
         return cls(
             download_root=str(root.resolve()),
             daemon_host=values.get("DOUYINKS_DAEMON_HOST", "127.0.0.1").strip() or "127.0.0.1",
             daemon_port=port,
             download_delay_seconds=delay,
+            sync_server_enabled=enabled in {"true", "1", "yes", "on"},
+            sync_server_host=values.get("SYNC_SERVER_HOST", "127.0.0.1").strip() or "127.0.0.1",
+            sync_server_port=sync_port,
+            sync_token=values.get("SYNC_TOKEN", "").strip(),
         )
 
     @property
@@ -76,6 +93,10 @@ class Settings:
     @property
     def download_history_path(self) -> str:
         return str(Path(self.download_root) / "download_history.json")
+
+    @property
+    def sync_state_path(self) -> str:
+        return str(Path(self.download_root) / "sync_state.json")
 
 
 def default_env_file() -> Path:
