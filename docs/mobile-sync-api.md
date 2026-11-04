@@ -87,6 +87,10 @@ Response:
 
 `media_type` is one of `video`, `image`, or `file`.
 
+An album or mixed post produces one entry per image or video, sharing the same `video_id` but using distinct file `id` values. The original file retains its legacy ID, such as `douyin:7640000000000000000`; additional files use IDs such as `douyin:7640000000000000000:author_123_7640000000000000000_002.webp`. Treat IDs as opaque values and use the supplied `download_url`. Acknowledgments apply only to the exact IDs submitted, so receiving one image does not acknowledge the rest of an album.
+
+Successfully saved files from a partially failed album are also eligible for sync. Retrying the download fills in missing files while keeping previously issued IDs and acknowledgments.
+
 ### `GET /sync/files/{file_id}`
 
 Download one file. Use the `download_url` returned by `/sync/pending`; do not build file paths on the phone.
@@ -180,7 +184,9 @@ douyinks sync-server
 
 ## Recovery records
 
-- `DOWNLOAD_ROOT/download_history.json`: successful download records and media file locations.
+- `DOWNLOAD_ROOT/download_history.json`: download records and media file locations. Album records include a `files` list with an independent ID, path, timestamp, and success status for each saved file; the post status remains `partial` until all requested files have downloaded.
 - `DOWNLOAD_ROOT/sync_state.json`: the original baseline, phone acknowledgments, and device IDs.
 
 Restoring the service code preserves these files. API reads leave the ledger unchanged; only acknowledgments from the phone update sync status. Files absent from their recorded location cannot be downloaded through the sync API.
+
+At startup, the service indexes previously unrecorded images and indexed album files in `DOWNLOAD_ROOT/douyin/likes` whose names follow the downloader's `author_timestamp_videoID[_index]` format. It preserves existing records and uses each newly indexed file's modification time, so the original baseline still determines eligibility. Unrelated names and symbolic links are ignored. This also recovers later images from albums whose legacy history recorded only the first file.

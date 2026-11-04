@@ -169,6 +169,8 @@ Connect both devices to the same LAN. Enter the displayed `http://LAN-IP:19827` 
 
 Recovery reuses `DOWNLOAD_ROOT/download_history.json` and `DOWNLOAD_ROOT/sync_state.json`, preserving the original baseline and phone acknowledgments. Files downloaded while the service was unavailable remain eligible under that original baseline when their files still exist. The API and response fields remain compatible; see the [Mobile Sync API](docs/mobile-sync-api.md).
 
+Douyin albums and mixed posts are synchronized per file. Each image and video has its own sync ID; acknowledging one file leaves the others pending. At startup, the sync service also indexes existing images and album files in `douyin/likes` that follow the downloader's naming convention. No new download is needed; original file times, the sync baseline, and existing acknowledgments are preserved.
+
 ## Configuration
 
 Editable installs read `.env` from the project root regardless of the terminal's working directory. Configuration is optional. Existing download paths remain in use. For a new environment:

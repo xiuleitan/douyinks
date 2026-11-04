@@ -7,6 +7,7 @@ from urllib.parse import quote
 from aiohttp import web
 
 from .config import Settings
+from .history import DownloadHistory
 from .sync_transfer import SyncTransferState
 
 
@@ -16,7 +17,11 @@ SETTINGS_KEY = web.AppKey("settings", Settings)
 
 def create_sync_app(settings: Settings) -> web.Application:
     validate_sync_settings(settings)
-    SyncTransferState(settings.sync_state_path).initialize_baseline(settings.download_history_path)
+    state = SyncTransferState(settings.sync_state_path)
+    recovered = DownloadHistory(settings.download_history_path).recover_douyin_media(settings.douyin_likes_dir)
+    if recovered:
+        logger.info("补录了 %s 个本地媒体文件，供手机按文件同步", recovered)
+    state.initialize_baseline(settings.download_history_path)
     app = web.Application()
     app[SETTINGS_KEY] = settings
     app.router.add_get("/sync/health", health)

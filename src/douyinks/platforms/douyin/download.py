@@ -136,15 +136,9 @@ async def _download_media_post(
         results["items"].append({"filename": f"{base_name}_001.jpg", "success": False, "status": "skipped"})
         return results
 
-    if history and video_id and history.is_successfully_downloaded("douyin", video_id):
-        for file_path in media_files:
-            results["skipped"] += 1
-            results["items"].append({"filename": file_path.name, "success": False, "status": "skipped"})
-        return results
-
     if all(file_path.exists() for file_path in media_files):
         if history and video_id:
-            history.record_success("douyin", video_id, media_files[0], media_files[0].name)
+            history.record_media_files("douyin", video_id, media_files)
         for file_path in media_files:
             results["skipped"] += 1
             results["items"].append({"filename": file_path.name, "success": False, "status": "skipped"})
@@ -170,8 +164,8 @@ async def _download_media_post(
         results["failed"] += 1
     else:
         results["success"] += 1
-        if history and video_id:
-            history.record_success("douyin", video_id, downloaded_files[0], downloaded_files[0].name)
+    if history and video_id and downloaded_files:
+        history.record_media_files("douyin", video_id, downloaded_files, complete=not failed)
     return results
 
 

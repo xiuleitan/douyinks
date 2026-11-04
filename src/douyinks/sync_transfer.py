@@ -38,9 +38,11 @@ class SyncTransferState:
         history = self._load_history(history_path)
         pending: list[dict[str, Any]] = []
         baseline_at = _parse_datetime(self._data.get("baseline_at"))
-        for file_id, item in sorted(history.get("downloads", {}).items()):
-            if not isinstance(item, dict) or item.get("status") != "success":
-                continue
+        files = (
+            entry for post_id, post in sorted(history.get("downloads", {}).items())
+            for entry in _history_files(post_id, post)
+        )
+        for file_id, item in files:
             if self._data["files"].get(file_id, {}).get("sync_status") in {"synced", "baseline"}:
                 continue
             downloaded_at = _parse_datetime(item.get("downloaded_at"))
@@ -78,13 +80,14 @@ class SyncTransferState:
 
     def file_path_from_history(self, history_path: str | Path, file_id: str) -> Path | None:
         history = self._load_history(history_path)
-        item = history.get("downloads", {}).get(file_id)
-        if not isinstance(item, dict) or item.get("status") != "success":
-            return None
-        file_path = Path(str(item.get("file_path", "")))
-        if not file_path.exists() or not file_path.is_file():
-            return None
-        return file_path
+        post_id = ":".join(file_id.split(":", 2)[:2])
+        post = history.get("downloads", {}).get(post_id)
+        for candidate_id, item in _history_files(post_id, post):
+            if candidate_id == file_id:
+                file_path = Path(str(item.get("file_path", "")))
+                if file_path.is_file():
+                    return file_path
+        return None
 
     def mark_synced(self, file_ids: list[str], device_id: str) -> int:
         with self._locked():
@@ -137,6 +140,17 @@ class SyncTransferState:
         except (json.JSONDecodeError, OSError):
             return {"version": 1, "downloads": {}}
         return data if isinstance(data, dict) else {"version": 1, "downloads": {}}
+
+
+def _history_files(post_id: str, post: Any):
+    if not isinstance(post, dict):
+        return
+    if isinstance(post.get("files"), list):
+        for file in post["files"]:
+            if isinstance(file, dict) and file.get("status") == "success" and file.get("id"):
+                yield file["id"], {**post, **file}
+    elif post.get("status") == "success":
+        yield post_id, post
 
 
 def media_type_for_path(path: Path) -> str:
